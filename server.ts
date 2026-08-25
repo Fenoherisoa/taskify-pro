@@ -1463,7 +1463,7 @@ app.post('/api/settings', (req, res) => {
 });
 
 // 7. Bot Simulation Engine (Exact Telegram State Machine)
-app.post('/api/bot/simulate-step', (req, res) => {
+app.post('/api/bot/simulate-step', async (req, res) => {
   const { sessionId = 'sim-user-1', action, input } = req.body;
   
   if (!userSessions[sessionId]) {
