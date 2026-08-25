@@ -1745,7 +1745,7 @@ app.post('/api/bot/simulate-step', (req, res) => {
   });
 });
 
-// 8. Test Google Sheets Webhook (Ovay ho GET parameters)
+// 8. Test Google Sheets Webhook
 app.post('/api/test-google-sheets', async (req, res) => {
   const { url, task } = req.body;
   const targetUrl = url || botSettings.googleSheetWebhookUrl;
@@ -1768,7 +1768,7 @@ app.post('/api/test-google-sheets', async (req, res) => {
       notes: 'Ligne de test générée par le tableau de bord'
     };
 
-    // Mamadika ho Query Parameters mba handeha tsara amin'ny Google Sheets
+    // Mamadika ho Query Parameters mba hitovy tanteraka tamin'ilay nandeha tsara teo
     const params = new URLSearchParams({
       id: dataToSend.id || '',
       uid: dataToSend.uid || '',
