@@ -177,7 +177,7 @@ async function syncToGoogleSheets(task) {
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
-      redirect: 'follow'
+      
     });
 
     clearTimeout(timeoutId);
