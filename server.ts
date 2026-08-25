@@ -2,8 +2,12 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { Telegraf, Markup } from 'telegraf';
-import { testDatabaseConnection } from './src/services/database';
+import { pool, testDatabaseConnection } from './src/services/database';
 import { initializeDatabase } from './src/services/databaseInit';
+import {
+  getOrCreateUser,
+  getUserWallet
+} from './src/services/userService';
 
 const app = express();
 const PORT = 3000;
@@ -435,7 +439,8 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const session = userSessions[userId];
     const t = getT(session.language);
 
-    const balance = session.balance || 0;
+    const wallet = await getUserWallet(userId);
+    const balance = wallet ? wallet.balance : 0;
     const tasksCompleted = session.tasksCompleted || 0;
     const referralsCount = session.referralsCount || 0;
     const referralEarnings = session.referralEarnings || 0;
@@ -502,7 +507,8 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     const session = userSessions[userId] || { step: 'START', language: 'fr', balance: 0 };
     const t = getT(session.language);
-    const balance = session.balance || 0;
+    const wallet = await getUserWallet(userId);
+    const balance = wallet ? wallet.balance : 0;
     const isEligible = balance >= MIN_WITHDRAWAL_USD;
 
     await ctx.reply(
@@ -750,7 +756,8 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     const session = userSessions[userId] || { step: 'START', language: 'fr', balance: 0 };
     const t = getT(session.language);
-    const balance = session.balance || 0;
+    const wallet = await getUserWallet(userId);
+    const balance = wallet ? wallet.balance : 0;
 
     if (balance < MIN_WITHDRAWAL_USD) {
       return renderScreen(
@@ -944,21 +951,71 @@ function setupTelegrafHandlers(bot: Telegraf) {
   });
 
   bot.action('action_check_balance', async (ctx) => {
+
     await ctx.answerCbQuery();
-    const userFirstName = ctx.from?.first_name || 'Utilisateur';
-    const userId = String(ctx.from?.id || 'unknown');
-    const session = userSessions[userId] || { balance: 0, tasksCompleted: 0, language: 'fr' };
+
+    const userFirstName =
+      ctx.from?.first_name || 'Utilisateur';
+
+    const userId =
+      String(ctx.from?.id || 'unknown');
+
+    const session =
+      userSessions[userId] || {
+        language: 'fr'
+      };
+
     const t = getT(session.language);
+
+    // -----------------------------------------------
+    // Récupérer les données depuis PostgreSQL
+    // -----------------------------------------------
+
+    const wallet = await getUserWallet(userId);
+
+    const balance = wallet
+      ? wallet.balance
+      : 0;
+
+    // Nombre réel de tâches complétées
+    const tasksResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS count
+      FROM tasks
+      WHERE telegram_user_id = $1
+        AND status = 'compte créé'
+      `,
+      [userId]
+    );
+
+    const tasksCompleted =
+      tasksResult.rows[0]?.count || 0;
+
+    // -----------------------------------------------
+    // Affichage
+    // -----------------------------------------------
 
     await renderScreen(
       ctx,
-      `💰 *Votre Solde Actuel :* \`$${(session.balance || 0).toFixed(3)} USD\`\n` +
+
+      `💰 *Votre Solde Actuel :* \`$${balance.toFixed(3)} USD\`\n` +
       `👤 *Utilisateur :* ${userFirstName} (ID: \`${userId}\`)\n` +
-      `📊 *Tâches complétées :* \`${session.tasksCompleted || 0}\`\n` +
+      `📊 *Tâches complétées :* \`${tasksCompleted}\`\n` +
       `⏳ *En attente :* \`$0.000\``,
+
       Markup.inlineKeyboard([
-        [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')],
-        [Markup.button.callback('🏦 ' + t.btn_withdraw, 'action_request_withdrawal')]
+        [
+          Markup.button.callback(
+            '🚀 ' + t.btn_tasks,
+            'task_facebook'
+          )
+        ],
+        [
+          Markup.button.callback(
+            '🏦 ' + t.btn_withdraw,
+            'action_request_withdrawal'
+          )
+        ]
       ])
     );
   });
@@ -1071,10 +1128,187 @@ function setupTelegrafHandlers(bot: Telegraf) {
         });
       }
 
-      // Update Ledger
-      session.balance = (session.balance || 0) + TASK_REWARD_USD;
-      session.tasksCompleted = (session.tasksCompleted || 0) + 1;
-      const currentBal = session.balance;
+      // -----------------------------------------------
+      // PERSISTENT LEDGER - PostgreSQL
+      // -----------------------------------------------
+
+      const client = await pool.connect();
+
+      let currentBal = 0;
+
+      try {
+        await client.query('BEGIN');
+
+        // 1. Créer ou récupérer le worker
+        const userResult = await client.query(
+          `
+          INSERT INTO users (
+            telegram_user_id,
+            telegram_username,
+            first_name,
+            last_name
+          )
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (telegram_user_id)
+          DO UPDATE SET
+            telegram_username = EXCLUDED.telegram_username,
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name,
+            updated_at = NOW()
+          RETURNING id
+          `,
+          [
+            String(userId),
+            username || null,
+            createdTask.firstName || null,
+            createdTask.lastName || null
+          ]
+        );
+
+        const dbUserId = userResult.rows[0].id;
+
+        // 2. Créer le wallet s'il n'existe pas
+        await client.query(
+          `
+          INSERT INTO wallets (
+            user_id,
+            balance,
+            total_earned,
+            total_withdrawn
+          )
+          VALUES ($1, 0, 0, 0)
+          ON CONFLICT (user_id) DO NOTHING
+          `,
+          [dbUserId]
+        );
+
+        // 3. Enregistrer la tâche dans PostgreSQL
+        await client.query(
+          `
+          INSERT INTO tasks (
+            task_id,
+            telegram_user_id,
+            task_type,
+            status,
+            uid,
+            first_name,
+            last_name,
+            password,
+            cookies,
+            reward_usd,
+            created_at,
+            completed_at
+          )
+          VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9,
+            $10, $11, NOW()
+          )
+          ON CONFLICT (task_id) DO NOTHING
+          `,
+          [
+            createdTask.id,
+            String(userId),
+            createdTask.taskType,
+            createdTask.status,
+            createdTask.uid,
+            createdTask.firstName,
+            createdTask.lastName,
+            createdTask.password,
+            createdTask.cookies,
+            TASK_REWARD_USD,
+            createdTask.createdAt
+          ]
+        );
+
+        // 4. Récupérer le solde actuel avec verrouillage
+        const walletResult = await client.query(
+          `
+          SELECT balance
+          FROM wallets
+          WHERE user_id = $1
+          FOR UPDATE
+          `,
+          [dbUserId]
+        );
+
+        if (walletResult.rows.length === 0) {
+          throw new Error(
+            `Wallet introuvable pour l'utilisateur ${userId}`
+          );
+        }
+
+        const balanceBefore = Number(
+          walletResult.rows[0].balance
+        );
+
+        currentBal =
+          balanceBefore + TASK_REWARD_USD;
+
+        // 5. Créditer le reward
+        await client.query(
+          `
+          UPDATE wallets
+          SET
+            balance = $1,
+            total_earned = total_earned + $2,
+            updated_at = NOW()
+          WHERE user_id = $3
+          `,
+          [
+            currentBal,
+            TASK_REWARD_USD,
+            dbUserId
+          ]
+        );
+
+        // 6. Enregistrer la transaction
+        await client.query(
+          `
+          INSERT INTO transactions (
+            user_id,
+            task_id,
+            type,
+            amount,
+            balance_before,
+            balance_after,
+            description
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `,
+          [
+            dbUserId,
+            createdTask.id,
+            'task_reward',
+            TASK_REWARD_USD,
+            balanceBefore,
+            currentBal,
+            `Reward pour la tâche ${createdTask.id}`
+          ]
+        );
+
+        await client.query('COMMIT');
+
+        console.log(
+          `💰 Reward enregistré: +$${TASK_REWARD_USD.toFixed(2)} | ` +
+          `Worker: ${userId} | ` +
+          `Balance: $${currentBal.toFixed(3)}`
+        );
+
+      } catch (error) {
+
+        await client.query('ROLLBACK');
+
+        console.error(
+          '❌ Erreur PostgreSQL lors du crédit de la tâche:',
+          error
+        );
+
+        throw error;
+
+      } finally {
+
+        client.release();
+      }
 
       delete userSessions[userId].step;
 
@@ -1358,7 +1592,8 @@ app.post('/api/bot/simulate-step', (req, res) => {
     normalizedAction = 'MENU_LANGUAGE';
   }
 
-  const balance = session.balance || 0;
+  const wallet = await getUserWallet(userId);
+  const balance = wallet ? wallet.balance : 0;
   const tasksCompleted = session.tasksCompleted || 0;
   const referralsCount = session.referralsCount || 0;
   const referralEarnings = session.referralEarnings || 0;
@@ -1707,10 +1942,187 @@ app.post('/api/bot/simulate-step', (req, res) => {
           });
         }
 
-        // Update Session Ledger
-        session.balance = (session.balance || 0) + TASK_REWARD_USD;
-        session.tasksCompleted = (session.tasksCompleted || 0) + 1;
-        const newBal = session.balance;
+        // -----------------------------------------------
+        // PERSISTENT LEDGER - PostgreSQL
+        // -----------------------------------------------
+
+        const client = await pool.connect();
+
+        let currentBal = 0;
+
+        try {
+          await client.query('BEGIN');
+
+          // 1. Créer ou récupérer le worker
+          const userResult = await client.query(
+            `
+            INSERT INTO users (
+              telegram_user_id,
+              telegram_username,
+              first_name,
+              last_name
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (telegram_user_id)
+            DO UPDATE SET
+              telegram_username = EXCLUDED.telegram_username,
+              first_name = EXCLUDED.first_name,
+              last_name = EXCLUDED.last_name,
+              updated_at = NOW()
+            RETURNING id
+            `,
+            [
+              String(userId),
+              username || null,
+              createdTask.firstName || null,
+              createdTask.lastName || null
+            ]
+          );
+
+          const dbUserId = userResult.rows[0].id;
+
+          // 2. Créer le wallet s'il n'existe pas
+          await client.query(
+            `
+            INSERT INTO wallets (
+              user_id,
+              balance,
+              total_earned,
+              total_withdrawn
+            )
+            VALUES ($1, 0, 0, 0)
+            ON CONFLICT (user_id) DO NOTHING
+            `,
+            [dbUserId]
+          );
+
+          // 3. Enregistrer la tâche dans PostgreSQL
+          await client.query(
+            `
+            INSERT INTO tasks (
+              task_id,
+              telegram_user_id,
+              task_type,
+              status,
+              uid,
+              first_name,
+              last_name,
+              password,
+              cookies,
+              reward_usd,
+              created_at,
+              completed_at
+            )
+            VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9,
+              $10, $11, NOW()
+            )
+            ON CONFLICT (task_id) DO NOTHING
+            `,
+            [
+              createdTask.id,
+              String(userId),
+              createdTask.taskType,
+              createdTask.status,
+              createdTask.uid,
+              createdTask.firstName,
+              createdTask.lastName,
+              createdTask.password,
+              createdTask.cookies,
+              TASK_REWARD_USD,
+              createdTask.createdAt
+            ]
+          );
+
+          // 4. Récupérer le solde actuel avec verrouillage
+          const walletResult = await client.query(
+            `
+            SELECT balance
+            FROM wallets
+            WHERE user_id = $1
+            FOR UPDATE
+            `,
+            [dbUserId]
+          );
+
+          if (walletResult.rows.length === 0) {
+            throw new Error(
+              `Wallet introuvable pour l'utilisateur ${userId}`
+            );
+          }
+
+          const balanceBefore = Number(
+            walletResult.rows[0].balance
+          );
+
+          currentBal =
+            balanceBefore + TASK_REWARD_USD;
+
+          // 5. Créditer le reward
+          await client.query(
+            `
+            UPDATE wallets
+            SET
+              balance = $1,
+              total_earned = total_earned + $2,
+              updated_at = NOW()
+            WHERE user_id = $3
+            `,
+            [
+              currentBal,
+              TASK_REWARD_USD,
+              dbUserId
+            ]
+          );
+
+          // 6. Enregistrer la transaction
+          await client.query(
+            `
+            INSERT INTO transactions (
+              user_id,
+              task_id,
+              type,
+              amount,
+              balance_before,
+              balance_after,
+              description
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `,
+            [
+              dbUserId,
+              createdTask.id,
+              'task_reward',
+              TASK_REWARD_USD,
+              balanceBefore,
+              currentBal,
+              `Reward pour la tâche ${createdTask.id}`
+            ]
+          );
+
+          await client.query('COMMIT');
+
+          console.log(
+            `💰 Reward enregistré: +$${TASK_REWARD_USD.toFixed(2)} | ` +
+            `Worker: ${userId} | ` +
+            `Balance: $${currentBal.toFixed(3)}`
+          );
+
+        } catch (error) {
+
+          await client.query('ROLLBACK');
+
+          console.error(
+            '❌ Erreur PostgreSQL lors du crédit de la tâche:',
+            error
+          );
+
+          throw error;
+
+        } finally {
+
+          client.release();
+        }
 
         delete session.step;
 
