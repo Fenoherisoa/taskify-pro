@@ -643,37 +643,37 @@ export async function sendToGoogleSheetsWebhook(task: TaskRecord, webhookUrl: st
     return { success: false, error: 'URL Google Sheets non configurée' };
   }
 
-  const payload = {
-    action: 'insert_task',
-    id: task.id,
-    timestamp: task.createdAt,
-    uid: task.uid,
-    cookies: task.cookies,
-    firstName: task.firstName,
-    lastName: task.lastName,
-    password: task.password,
-    telegramUserId: task.telegramUserId,
-    telegramUsername: task.telegramUsername,
-    status: task.status,
-    notes: task.notes || '',
-    taskType: task.taskType || 'Facebook'
-  };
+  // Mamadika ny task ho Query Parameters (GET)
+  const params = new URLSearchParams({
+    id: task.id || '',
+    uid: task.uid || '',
+    firstName: task.firstName || '',
+    lastName: task.lastName || '',
+    password: task.password || '',
+    cookies: task.cookies || '',
+    telegramUserId: String(task.telegramUserId || ''),
+    telegramUsername: task.telegramUsername || '',
+    status: task.status || 'compte créé',
+    notes: task.notes || ''
+  });
+
+  const fullUrl = `${webhookUrl}?${params.toString()}`;
 
   try {
-    // Alefaso hatrany amin'ny alalan'ny backend proxy (izay efa ao amin'ny code-nao)
-    const proxyRes = await safeFetchJson<{ success: boolean; error?: string }>('/api/test-google-sheets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: webhookUrl, task: payload })
+    // Mandefa GET mivantana any amin'ny Google Apps Script
+    const response = await fetch(fullUrl, {
+      method: 'GET',
+      redirect: 'follow'
     });
 
-    if (proxyRes && proxyRes.success) {
+    const responseText = await response.text();
+    
+    if (response.ok || response.status < 400) {
       addClientLog('success', 'sheets', `Synchronisé avec Google Sheets pour UID: ${task.uid}`);
-      return { success: true, message: 'Synchronisé via serveur' };
+      return { success: true, message: 'Synchronisé avec succès' };
     } else {
-      throw new Error(proxyRes?.error || 'Erreur serveur proxy Google Sheets');
+      throw new Error(`Erreur HTTP ${response.status}`);
     }
-
   } catch (err: any) {
     addClientLog('error', 'sheets', `Erreur Webhook Google Sheets: ${err.message}`);
     return { success: false, error: err.message };

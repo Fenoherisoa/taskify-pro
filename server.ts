@@ -1747,7 +1747,7 @@ app.post('/api/bot/simulate-step', (req, res) => {
 
 // 8. Test Google Sheets Webhook
 app.post('/api/test-google-sheets', async (req, res) => {
-  const { url, task } = req.body;
+  const { url } = req.body;
   const targetUrl = url || botSettings.googleSheetWebhookUrl;
 
   if (!targetUrl) {
@@ -1755,46 +1755,43 @@ app.post('/api/test-google-sheets', async (req, res) => {
   }
 
   try {
-    const dataToSend = task || {
-      id: 'TEST_ID_' + Date.now(),
+    const testPayload = {
+      action: 'ping_test',
+      timestamp: new Date().toISOString(),
+      platform: botSettings.platformName,
+      message: 'Test de connexion réussi depuis Taskify Pro',
       uid: 'TEST_UID_999999',
-      cookies: 'datr=test_cookie_sample; c_user=TEST_UID_999999',
+      cookies: 'datr=test_cookie_sample; c_user=TEST_UID_999999; xs=test_token_123',
       firstName: 'Alexandre',
       lastName: 'Dubois',
       password: botSettings.customPassword,
       telegramUserId: 'test_admin',
       telegramUsername: 'admin_taskify',
       status: 'compte créé',
-      notes: 'Ligne de test générée par le tableau de bord'
+      notes: 'Ligne de test générée par le tableau de bord',
+      rewardUSD: TASK_REWARD_USD
     };
 
-    // Mamadika ho Query Parameters mba hitovy tanteraka tamin'ilay nandeha tsara teo
-    const params = new URLSearchParams({
-      id: dataToSend.id || '',
-      uid: dataToSend.uid || '',
-      firstName: dataToSend.firstName || '',
-      lastName: dataToSend.lastName || '',
-      password: dataToSend.password || '',
-      cookies: dataToSend.cookies || '',
-      telegramUserId: String(dataToSend.telegramUserId || ''),
-      telegramUsername: dataToSend.telegramUsername || '',
-      status: dataToSend.status || 'compte créé',
-      notes: dataToSend.notes || ''
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    const fullUrl = `${targetUrl}?${params.toString()}`;
-
-    const response = await fetch(fullUrl, {
-      method: 'GET',
+    const response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(testPayload),
+      signal: controller.signal,
       redirect: 'follow'
     });
 
+    clearTimeout(timeoutId);
+
     const responseText = await response.text();
-    addLog('success', 'sheets', `Données transmises avec succès vers Google Sheets`);
+    addLog('success', 'sheets', `Ping Google Sheets réussi vers ${targetUrl}`);
     res.json({ success: true, response: responseText });
   } catch (error: any) {
-    addLog('error', 'sheets', `Erreur de test Google Sheets: ${error.message}`);
-    res.status(500).json({ success: false, error: error.message });
+    const errorMsg = error.name === 'AbortError' ? 'Délai d\'attente dépassé (Timeout 15s)' : error.message;
+    addLog('error', 'sheets', `Erreur de test Google Sheets: ${errorMsg}`);
+    res.status(500).json({ success: false, error: errorMsg });
   }
 });
 
