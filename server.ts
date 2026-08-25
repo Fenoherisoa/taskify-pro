@@ -10,6 +10,15 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ----------------------------------------------------
+// FINANCIAL & COMMISSION CONSTANTS (USD)
+// ----------------------------------------------------
+const TASK_REWARD_USD = 0.04;                  // $0.04 per completed task
+const REFERRAL_SIGNUP_BONUS_USD = 0.01;        // $0.01 direct referral registration bonus
+const REFERRAL_COMMISSION_PERCENT = 20;        // 20% recurring task commission
+const REFERRAL_TASK_COMMISSION_USD = 0.008;    // $0.008 per task (20% of $0.04)
+const MIN_WITHDRAWAL_USD = 1.00;               // $1.00 minimum payout threshold
+
+// ----------------------------------------------------
 // IN-MEMORY DATABASE & CONFIG STATE
 // ----------------------------------------------------
 const FIRST_NAMES = [
@@ -47,7 +56,6 @@ let botSettings = {
 };
 
 let tasks: any[] = [];
-
 let logs: any[] = [];
 
 function addLog(type: 'info' | 'success' | 'warning' | 'error', source: 'telegram' | 'sheets' | 'system' | 'simulator', message: string, data?: any) {
@@ -73,6 +81,11 @@ const userSessions: Record<string, {
   password?: string;
   uid?: string;
   cookies?: string;
+  language?: 'fr' | 'en' | 'ru' | 'es' | 'id';
+  balance?: number;
+  tasksCompleted?: number;
+  referralsCount?: number;
+  referralEarnings?: number;
 }> = {};
 
 // Helper: Dispatch task record to Google Apps Script Webhook
@@ -97,7 +110,8 @@ async function syncRowToGoogleSheets(task: any): Promise<{ success: boolean; mes
       telegramUsername: task.telegramUsername || 'utilisateur',
       status: task.status || 'compte créé',
       notes: task.notes || `Enregistré via ${botSettings.platformName || 'Taskify Pro'} (@TaskifyProBot)`,
-      taskType: task.taskType || 'Facebook'
+      taskType: task.taskType || 'Facebook',
+      rewardUSD: TASK_REWARD_USD
     };
 
     console.log(`[Google Sheets] 📡 Transmission des données vers Google Sheets Webhook (UID: ${task.uid})...`);
@@ -138,16 +152,199 @@ async function syncRowToGoogleSheets(task: any): Promise<{ success: boolean; mes
 }
 
 // ----------------------------------------------------
+// 5-LANGUAGE TRANSLATION DICTIONARY
+// ----------------------------------------------------
+const TRANSLATIONS = {
+  fr: {
+    welcome: `👋 *Bienvenue sur ${botSettings.platformName} (@TaskifyProBot) !*\n\n` +
+      `Plateforme officielle d'exécution et de validation de tâches rémunérées.\n\n` +
+      `💵 *Rémunération :* \`$${TASK_REWARD_USD.toFixed(2)}\` par compte validé\n` +
+      `🎁 *Bonus Parrainage :* \`$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` à l'inscription + \`${REFERRAL_COMMISSION_PERCENT}%\` des gains de vos filleuls\n` +
+      `🎯 *Seuil de retrait :* \`$${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
+      `Utilisez le menu ci-dessous ou cliquez pour démarrer :`,
+    balance_title: `💰 *Votre Solde & Activité*`,
+    tasks_title: `🌐 *Tâche : Création de Compte Facebook*`,
+    withdrawal_title: `🏦 *Demande de Retrait de Gains*`,
+    support_title: `📞 *Support & Assistance Opérateurs*`,
+    referral_title: `👥 *Programme de Parrainage & Commissions*`,
+    leaderboard_title: `🏆 *Classement des Meilleurs Opérateurs (Ce Mois)*`,
+    lang_title: `🪩 *Sélection de la Langue*`,
+    lang_confirm: `✅ La langue du bot est maintenant configurée en **Français** 🇫🇷.`,
+    btn_tasks: `📋 Effectuer une Tâche`,
+    btn_withdraw: `🏦 Demander un Retrait`,
+    btn_support: `💬 Contacter le Support`,
+    btn_rules: `ℹ️ Consignes & Règles`,
+    btn_cancel: `❌ Annuler le processus`,
+    btn_cookies: `🍪 Cookies (Recommandé)`,
+    btn_2fa: `🔐 2FA (Clé d'accès)`,
+    btn_send_uid: `📥 Envoyer l'UID`,
+    btn_share_ref: `📤 Partager mon lien`,
+    cookies_reward_notice: `💵 *Rémunération par compte validé :* \`$${TASK_REWARD_USD.toFixed(2)}\``,
+    task_rules_text: `📋 *Consignes & Règles de Validation Facebook*\n\n` +
+      `1. Utilisez obligatoirement le prénom et le nom fournis.\n` +
+      `2. Utilisez le mot de passe assigné sans le modifier.\n` +
+      `3. Extrayez les cookies complets contenant \`c_user\`, \`datr\` et \`xs\`.\n` +
+      `4. Rémunération : \`$${TASK_REWARD_USD.toFixed(2)}\` par tâche validée.`,
+    awaiting_uid: `✍️ *Étape 1/2 : Envoi de l'UID Facebook*\n\nVeuillez coller votre **UID Facebook** (ex: \`100084928172910\`) :`,
+    awaiting_cookies: `🍪 *Étape 2/2 : Envoi des Cookies*\n\nVeuillez maintenant coller vos **Cookies Facebook** complets (ex: format \`datr=...; c_user=...; xs=...\`) :`,
+    cancelled: `❌ *Processus annulé.*\nAucune donnée n'a été enregistrée.`
+  },
+  en: {
+    welcome: `👋 *Welcome to ${botSettings.platformName} (@TaskifyProBot)!*\n\n` +
+      `Official automated platform for rewarded account creation tasks.\n\n` +
+      `💵 *Task Reward:* \`$${TASK_REWARD_USD.toFixed(2)}\` per verified account\n` +
+      `🎁 *Referral Bonus:* \`$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` on signup + \`${REFERRAL_COMMISSION_PERCENT}%\` commission per referred task\n` +
+      `🎯 *Min Payout:* \`$${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
+      `Use the persistent menu below to start working:`,
+    balance_title: `💰 *Your Balance & Performance*`,
+    tasks_title: `🌐 *Task: Facebook Account Creation*`,
+    withdrawal_title: `🏦 *Payout Request*`,
+    support_title: `📞 *Support & Helpdesk*`,
+    referral_title: `👥 *Referral Program & Commissions*`,
+    leaderboard_title: `🏆 *Top Operators Leaderboard (This Month)*`,
+    lang_title: `🪩 *Language Selection*`,
+    lang_confirm: `✅ Bot language updated to **English** 🇬🇧.`,
+    btn_tasks: `📋 Start a Task`,
+    btn_withdraw: `🏦 Request Payout`,
+    btn_support: `💬 Contact Support`,
+    btn_rules: `ℹ️ Guidelines & Rules`,
+    btn_cancel: `❌ Cancel Process`,
+    btn_cookies: `🍪 Cookies (Recommended)`,
+    btn_2fa: `🔐 2FA (Access Key)`,
+    btn_send_uid: `📥 Submit UID`,
+    btn_share_ref: `📤 Share Referral Link`,
+    cookies_reward_notice: `💵 *Reward per verified account:* \`$${TASK_REWARD_USD.toFixed(2)}\``,
+    task_rules_text: `📋 *Facebook Account Guidelines*\n\n` +
+      `1. Always use the generated First & Last name.\n` +
+      `2. Use the exact assigned password.\n` +
+      `3. Export full cookies including \`c_user\`, \`datr\` and \`xs\`.\n` +
+      `4. Reward: \`$${TASK_REWARD_USD.toFixed(2)}\` per valid submission.`,
+    awaiting_uid: `✍️ *Step 1/2: Submit Facebook UID*\n\nPlease paste your **Facebook UID** (e.g. \`100084928172910\`) :`,
+    awaiting_cookies: `🍪 *Step 2/2: Submit Cookies*\n\nPlease paste your full **Facebook Cookies** (e.g. \`datr=...; c_user=...; xs=...\`) :`,
+    cancelled: `❌ *Process cancelled.*\nNo data has been saved.`
+  },
+  ru: {
+    welcome: `👋 *Добро пожаловать в ${botSettings.platformName} (@TaskifyProBot)!*\n\n` +
+      `Официальная платформа для выполнения оплачиваемых заданий.\n\n` +
+      `💵 *Оплата:* \`$${TASK_REWARD_USD.toFixed(2)}\` за каждый подтвержденный аккаунт\n` +
+      `🎁 *Реферальный бонус:* \`$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` за регистрацию + \`${REFERRAL_COMMISSION_PERCENT}%\` комиссионных\n` +
+      `🎯 *Мин. вывод:* \`$${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
+      `Используйте меню ниже для начала работы:`,
+    balance_title: `💰 *Ваш Баланс и Статистика*`,
+    tasks_title: `🌐 *Задание: Создание аккаунта Facebook*`,
+    withdrawal_title: `🏦 *Запрос на Вывод Средств*`,
+    support_title: `📞 *Служба Поддержки*`,
+    referral_title: `👥 *Партнерская Программа и Рефералы*`,
+    leaderboard_title: `🏆 *Рейтинг Лучших Операторов (Этот Месяц)*`,
+    lang_title: `🪩 *Выбор Языка / Language*`,
+    lang_confirm: `✅ Язык бота успешно изменен на **Русский** 🇷🇺.`,
+    btn_tasks: `📋 Выполнить задание`,
+    btn_withdraw: `🏦 Заказать вывод`,
+    btn_support: `💬 Написать в поддержку`,
+    btn_rules: `ℹ️ Правила и инструкции`,
+    btn_cancel: `❌ Отменить процесс`,
+    btn_cookies: `🍪 Cookies (Рекомендуется)`,
+    btn_2fa: `🔐 2FA (Код доступа)`,
+    btn_send_uid: `📥 Отправить UID`,
+    btn_share_ref: `📤 Поделиться ссылкой`,
+    cookies_reward_notice: `💵 *Оплата за подтвержденный аккаунт:* \`$${TASK_REWARD_USD.toFixed(2)}\``,
+    task_rules_text: `📋 *Инструкция по созданию Facebook*\n\n` +
+      `1. Обязательно используйте сгенерированные имя и фамилию.\n` +
+      `2. Используйте указанный пароль без изменений.\n` +
+      `3. Экспортируйте полные cookies с \`c_user\`, \`datr\` и \`xs\`.\n` +
+      `4. Оплата: \`$${TASK_REWARD_USD.toFixed(2)}\` за каждое задание.`,
+    awaiting_uid: `✍️ *Шаг 1/2: Отправка Facebook UID*\n\nОтправьте ваш **UID Facebook** (напр. \`100084928172910\`) :`,
+    awaiting_cookies: `🍪 *Шаг 2/2: Отправка Cookies*\n\nОтправьте полные **Cookies Facebook** (напр. \`datr=...; c_user=...; xs=...\`) :`,
+    cancelled: `❌ *Процесс отменен.*\nДанные не были сохранены.`
+  },
+  es: {
+    welcome: `👋 *¡Bienvenido a ${botSettings.platformName} (@TaskifyProBot)!*\n\n` +
+      `Plataforma oficial para tareas remuneradas de creación de cuentas.\n\n` +
+      `💵 *Pago por tarea:* \`$${TASK_REWARD_USD.toFixed(2)}\` por cuenta validada\n` +
+      `🎁 *Bono de Referidos:* \`$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` por registro + \`${REFERRAL_COMMISSION_PERCENT}%\` de comisión continua\n` +
+      `🎯 *Retiro mínimo:* \`$${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
+      `Usa el menú inferior para comenzar :`,
+    balance_title: `💰 *Tu Saldo y Rendimiento*`,
+    tasks_title: `🌐 *Tarea: Creación de Cuenta Facebook*`,
+    withdrawal_title: `🏦 *Solicitud de Retiro*`,
+    support_title: `📞 *Soporte y Asistencia*`,
+    referral_title: `👥 *Programa de Referidos y Comisiones*`,
+    leaderboard_title: `🏆 *Clasificación de Mejores Operadores*`,
+    lang_title: `🪩 *Selección de Idioma*`,
+    lang_confirm: `✅ Idioma configurado en **Español** 🇪🇸.`,
+    btn_tasks: `📋 Realizar una Tarea`,
+    btn_withdraw: `🏦 Solicitar Retiro`,
+    btn_support: `💬 Contactar Soporte`,
+    btn_rules: `ℹ️ Reglas e Instrucciones`,
+    btn_cancel: `❌ Cancelar proceso`,
+    btn_cookies: `🍪 Cookies (Recomendado)`,
+    btn_2fa: `🔐 2FA (Código de acceso)`,
+    btn_send_uid: `📥 Enviar UID`,
+    btn_share_ref: `📤 Compartir enlace`,
+    cookies_reward_notice: `💵 *Pago por cuenta verificada:* \`$${TASK_REWARD_USD.toFixed(2)}\``,
+    task_rules_text: `📋 *Reglas para Cuentas de Facebook*\n\n` +
+      `1. Usa siempre el nombre y apellido generados.\n` +
+      `2. Usa la contraseña asignada sin cambios.\n` +
+      `3. Extrae las cookies completas (\`c_user\`, \`datr\`, \`xs\`).\n` +
+      `4. Recompensa: \`$${TASK_REWARD_USD.toFixed(2)}\` por tarea validada.`,
+    awaiting_uid: `✍️ *Paso 1/2: Enviar UID de Facebook*\n\nEnvía tu **UID de Facebook** (ej: \`100084928172910\`) :`,
+    awaiting_cookies: `🍪 *Paso 2/2: Enviar Cookies*\n\nEnvía tus **Cookies de Facebook** completas (ej: \`datr=...; c_user=...; xs=...\`) :`,
+    cancelled: `❌ *Proceso cancelado.*\nNo se guardó información.`
+  },
+  id: {
+    welcome: `👋 *Selamat Datang di ${botSettings.platformName} (@TaskifyProBot)!*\n\n` +
+      `Platform otomatis resmi untuk pengerjaan tugas pembuatan akun berbayar.\n\n` +
+      `💵 *Hadiah per Akun:* \`$${TASK_REWARD_USD.toFixed(2)}\` per akun tervalidasi\n` +
+      `🎁 *Bonus Referral:* \`$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` pendaftaran + komisi \`${REFERRAL_COMMISSION_PERCENT}%\` dari setiap tugas referral\n` +
+      `🎯 *Minimal Penarikan:* \`$${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
+      `Gunakan menu di bawah untuk memulai:`,
+    balance_title: `💰 *Saldo & Aktivitas Anda*`,
+    tasks_title: `🌐 *Tugas: Pembuatan Akun Facebook*`,
+    withdrawal_title: `🏦 *Permintaan Penarikan Saldo*`,
+    support_title: `📞 *Pusat Bantuan & Dukungan*`,
+    referral_title: `👥 *Program Referral & Komisi*`,
+    leaderboard_title: `🏆 *Papan Peringkat Operator Terbaik*`,
+    lang_title: `🪩 *Pilihan Bahasa / Language*`,
+    lang_confirm: `✅ Bahasa bot berhasil diubah ke **Bahasa Indonesia** 🇮🇩.`,
+    btn_tasks: `📋 Kerjakan Tugas`,
+    btn_withdraw: `🏦 Tarik Saldo`,
+    btn_support: `💬 Hubungi Dukungan`,
+    btn_rules: `ℹ️ Panduan & Aturan`,
+    btn_cancel: `❌ Batalkan Proses`,
+    btn_cookies: `🍪 Cookies (Disarankan)`,
+    btn_2fa: `🔐 2FA (Kode Akses)`,
+    btn_send_uid: `📥 Kirim UID`,
+    btn_share_ref: `📤 Bagikan Link Referral`,
+    cookies_reward_notice: `💵 *Imbalan per akun terverifikasi:* \`$${TASK_REWARD_USD.toFixed(2)}\``,
+    task_rules_text: `📋 *Panduan Akun Facebook*\n\n` +
+      `1. Selalu gunakan nama depan dan belakang yang diberikan.\n` +
+      `2. Gunakan kata sandi yang telah ditentukan tanpa diubah.\n` +
+      `3. Ekspor cookies lengkap (\`c_user\`, \`datr\`, \`xs\`).\n` +
+      `4. Imbalan: \`$${TASK_REWARD_USD.toFixed(2)}\` per tugas valid.`,
+    awaiting_uid: `✍️ *Langkah 1/2: Kirim UID Facebook*\n\nSilakan tempel **UID Facebook** Anda (contoh: \`100084928172910\`) :`,
+    awaiting_cookies: `🍪 *Langkah 2/2: Kirim Cookies*\n\nSilakan tempel **Cookies Facebook** lengkap (contoh: \`datr=...; c_user=...; xs=...\`) :`,
+    cancelled: `❌ *Proses dibatalkan.*\nTidak ada data yang disimpan.`
+  }
+};
+
+function getT(lang?: string) {
+  if (lang && lang in TRANSLATIONS) {
+    return TRANSLATIONS[lang as keyof typeof TRANSLATIONS];
+  }
+  return TRANSLATIONS.fr;
+}
+
+// ----------------------------------------------------
 // LIVE TELEGRAM BOT INSTANCE (OPTIONAL REAL LAUNCH)
 // ----------------------------------------------------
 let activeTelegrafBot: Telegraf | null = null;
 
 // Persistent Reply Keyboard (Menu Principal)
 const MAIN_REPLY_KEYBOARD = Markup.keyboard([
-  ['💰 Solde', '📋 Tâches'],
-  ['🏦 Retrait', '📞 Support'],
-  ['👥 Parrainages', '🏆 Classement'],
-  ['🪩 Langue']
+  ['💰 Solde / Balance', '📋 Tâches / Tasks'],
+  ['🏦 Retrait / Withdraw', '📞 Support'],
+  ['👥 Parrainages / Referrals', '🏆 Classement / Top'],
+  ['🪩 Langue / Language']
 ]).resize();
 
 function setupTelegrafHandlers(bot: Telegraf) {
@@ -172,20 +369,35 @@ function setupTelegrafHandlers(bot: Telegraf) {
       ...extra
     });
   };
+
   // /start command
   bot.start(async (ctx) => {
     const userId = String(ctx.from?.id || 'unknown');
     const userFirstName = ctx.from?.first_name || 'utilisateur';
-    userSessions[userId] = { step: 'START' };
+    if (!userSessions[userId]) {
+      userSessions[userId] = {
+        step: 'START',
+        language: 'fr',
+        balance: 0.000,
+        tasksCompleted: 0,
+        referralsCount: 0,
+        referralEarnings: 0.000
+      };
+    } else {
+      userSessions[userId].step = 'START';
+    }
+
+    const t = getT(userSessions[userId]?.language);
 
     await ctx.reply(
-      `👋 *Bienvenue sur ${botSettings.platformName} (@TaskifyProBot) !*\n\n` +
-      `Bonjour *${userFirstName}*,\n` +
-      `Utilisez le menu ci-dessous pour gérer vos tâches ou suivre votre activité.\n\n` +
-      `👉 Cliquez sur *📋 Tâches* pour débuter la création d'un compte.`,
+      t.welcome,
       {
         parse_mode: 'Markdown',
-        ...MAIN_REPLY_KEYBOARD
+        ...MAIN_REPLY_KEYBOARD,
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')],
+          [Markup.button.callback('💰 ' + t.balance_title.split('*')[1] || 'Solde', 'action_check_balance')]
+        ])
       }
     );
   });
@@ -198,37 +410,55 @@ function setupTelegrafHandlers(bot: Telegraf) {
   const handleBalance = async (ctx: any) => {
     const userFirstName = ctx.from?.first_name || 'Utilisateur';
     const userId = String(ctx.from?.id || 'unknown');
-    userSessions[userId] = { step: 'START' };
+    if (!userSessions[userId]) {
+      userSessions[userId] = { step: 'START', language: 'fr', balance: 0, tasksCompleted: 0, referralsCount: 0, referralEarnings: 0 };
+    }
+    const session = userSessions[userId];
+    const t = getT(session.language);
+
+    const balance = session.balance || 0;
+    const tasksCompleted = session.tasksCompleted || 0;
+    const referralsCount = session.referralsCount || 0;
+    const referralEarnings = session.referralEarnings || 0;
 
     await ctx.reply(
-      `💰 *Votre Solde & Activité*\n\n` +
+      `${t.balance_title}\n\n` +
       `👤 Utilisateur : *${userFirstName}*\n` +
       `🆔 ID Compte : \`${userId}\`\n` +
-      `🛡️ Statut : *Vérifié* ✅\n\n` +
-      `💵 *Solde validé disponible :* \`0.00 €\`\n` +
-      `⏳ *En cours de validation :* \`0.00 €\`\n` +
-      `📊 *Tâches totales complétées :* \`0\`\n` +
-      `👥 *Filleuls enregistrés :* \`0\` (+0.00 €)\n\n` +
-      `_Rémunération standard : 1.50 € par compte Facebook validé._`,
+      `🛡️ Statut : *Vérifié* ✅\n` +
+      `━━━━━━━━━━━━━━━━━━\n` +
+      `💵 *Solde validé disponible :* \`$${balance.toFixed(3)}\`\n` +
+      `⏳ *En cours de validation :* \`$0.000\`\n` +
+      `📊 *Tâches validées :* \`${tasksCompleted}\` (\`$${(tasksCompleted * TASK_REWARD_USD).toFixed(3)}\`)\n` +
+      `👥 *Filleuls actifs :* \`${referralsCount}\` (\`+$${referralEarnings.toFixed(3)}\`)\n` +
+      `━━━━━━━━━━━━━━━━━━\n` +
+      `_Rémunération standard : $${TASK_REWARD_USD.toFixed(2)} par compte Facebook validé._`,
       {
         parse_mode: 'Markdown',
         ...MAIN_REPLY_KEYBOARD,
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('📋 Effectuer une Tâche', 'task_facebook')],
-          [Markup.button.callback('🏦 Demander un Retrait', 'action_request_withdrawal')]
+          [Markup.button.callback('📋 ' + t.btn_tasks, 'task_facebook')],
+          [Markup.button.callback('🏦 ' + t.btn_withdraw, 'action_request_withdrawal')]
         ])
       }
     );
   };
 
-  // Helper: Handle 📋 Tâches / 🌐 Démarrer tâche Facebook
+  // Helper: Handle 📋 Tâches
   const handleTasks = async (ctx: any) => {
     const userId = String(ctx.from?.id || 'unknown');
-    userSessions[userId] = { step: 'AUTH_CHOICE', taskType: 'Facebook' };
+    if (!userSessions[userId]) {
+      userSessions[userId] = { step: 'AUTH_CHOICE', taskType: 'Facebook', language: 'fr' };
+    } else {
+      userSessions[userId].step = 'AUTH_CHOICE';
+      userSessions[userId].taskType = 'Facebook';
+    }
+    const t = getT(userSessions[userId]?.language);
 
     await ctx.reply(
-      `🌐 *Tâche : Création de Compte Facebook*\n\n` +
-      `💵 Rémunération par compte validé : *1.50 €*\n\n` +
+      `${t.tasks_title}\n\n` +
+      `💵 *Rémunération par compte validé :* \`$${TASK_REWARD_USD.toFixed(2)}\`\n` +
+      `🎁 *Commission parrainage reçue :* \`${REFERRAL_COMMISSION_PERCENT}%\` (\`$${REFERRAL_TASK_COMMISSION_USD.toFixed(3)}\` / tâche filleul)\n\n` +
       `Choisissez votre méthode d'authentification pour cette tâche :\n\n` +
       `• 🍪 *Cookies* : Recommandé pour validation et enregistrement immédiat.\n` +
       `• 🔐 *2FA* : Authentification par clé sécurisée.\n\n` +
@@ -238,11 +468,11 @@ function setupTelegrafHandlers(bot: Telegraf) {
         ...MAIN_REPLY_KEYBOARD,
         ...Markup.inlineKeyboard([
           [
-            Markup.button.callback('🍪 Cookies (Recommandé)', 'auth_cookies'),
-            Markup.button.callback('🔐 2FA', 'auth_2fa')
+            Markup.button.callback(t.btn_cookies, 'auth_cookies'),
+            Markup.button.callback(t.btn_2fa, 'auth_2fa')
           ],
-          [Markup.button.callback('ℹ️ Consignes & Règles', 'action_task_rules')],
-          [Markup.button.callback('❌ Annuler le processus', 'action_cancel')]
+          [Markup.button.callback(t.btn_rules, 'action_task_rules')],
+          [Markup.button.callback(t.btn_cancel, 'action_cancel')]
         ])
       }
     );
@@ -251,24 +481,29 @@ function setupTelegrafHandlers(bot: Telegraf) {
   // Helper: Handle 🏦 Retrait
   const handleWithdrawal = async (ctx: any) => {
     const userId = String(ctx.from?.id || 'unknown');
-    userSessions[userId] = { step: 'START' };
+    const session = userSessions[userId] || { step: 'START', language: 'fr', balance: 0 };
+    const t = getT(session.language);
+    const balance = session.balance || 0;
+    const isEligible = balance >= MIN_WITHDRAWAL_USD;
 
     await ctx.reply(
-      `🏦 *Demande de Retrait de Gains*\n\n` +
-      `💵 Solde disponible : *0.00 €*\n` +
-      `🎯 Seuil minimum de retrait : *10.00 €*\n` +
-      `🛡️ Statut : 🟡 *En attente du seuil (10.00 €)*\n\n` +
+      `${t.withdrawal_title}\n\n` +
+      `💵 Solde disponible : *${balance.toFixed(3)} $* USD\n` +
+      `🎯 Seuil minimum de retrait : *${MIN_WITHDRAWAL_USD.toFixed(2)} $* USD\n` +
+      `🛡️ Statut : ${isEligible ? '🟢 *Éligible au retrait immédiat*' : '🟡 *En attente du seuil ($' + MIN_WITHDRAWAL_USD.toFixed(2) + ')*'}\n\n` +
       `Moyens de paiement pris en charge :\n` +
-      `• 📱 *Mobile Money* (MVola, Orange Money, Airtel Money)\n` +
       `• 🪙 *Crypto USDT* (TRC20 / BEP20 - 0 frais)\n` +
-      `• 💳 *Virement Bancaire SEPA*\n\n` +
-      `_Complétez des tâches pour débloquer votre premier retrait._`,
+      `• 📱 *Mobile Money* (MVola, Orange Money, Airtel Money)\n` +
+      `• 💳 *Virement Bancaire (SEPA / International)*\n\n` +
+      (isEligible
+        ? `✅ _Sélectionnez votre moyen de retrait ci-dessous :_`
+        : `⚠️ _Complétez encore ${Math.max(1, Math.ceil((MIN_WITHDRAWAL_USD - balance) / TASK_REWARD_USD))} tâche(s) pour débloquer votre premier retrait._`),
       {
         parse_mode: 'Markdown',
         ...MAIN_REPLY_KEYBOARD,
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('📱 Mobile Money (MVola/Orange/Airtel)', 'withdraw_mobile_money')],
           [Markup.button.callback('🪙 Crypto USDT (TRC-20)', 'withdraw_crypto')],
+          [Markup.button.callback('📱 Mobile Money (MVola/Orange/Airtel)', 'withdraw_mobile_money')],
           [Markup.button.callback('💳 Virement Bancaire (SEPA)', 'withdraw_bank')]
         ])
       }
@@ -278,21 +513,22 @@ function setupTelegrafHandlers(bot: Telegraf) {
   // Helper: Handle 📞 Support
   const handleSupport = async (ctx: any) => {
     const userId = String(ctx.from?.id || 'unknown');
-    userSessions[userId] = { step: 'START' };
+    const session = userSessions[userId] || { step: 'START', language: 'fr' };
+    const t = getT(session.language);
 
     await ctx.reply(
-      `📞 *Support & Assistance Opérateurs*\n\n` +
+      `${t.support_title}\n\n` +
       `Une question technique, un blocage ou une demande de paiement ?\n\n` +
       `👤 *Administrateur Support :* @TaskifySupport\n` +
       `📢 *Canal Officiel :* @TaskifyAnnouncements\n` +
       `⏰ *Horaires :* 7j/7 — 08h00 à 22h00 (UTC+1)\n` +
       `⚡ *Délai moyen de réponse :* < 15 minutes\n\n` +
-      `_Cliquez sur le bouton ci-dessous pour ouvrir directement la conversation :_`,
+      `_Cliquez sur le bouton ci-dessous pour ouvrir la conversation :_`,
       {
         parse_mode: 'Markdown',
         ...MAIN_REPLY_KEYBOARD,
         ...Markup.inlineKeyboard([
-          [Markup.button.url('💬 Ouvrir le Support Telegram', 'https://t.me/TaskifySupport')],
+          [Markup.button.url('💬 ' + t.btn_support, 'https://t.me/TaskifySupport')],
           [Markup.button.callback('❓ FAQ & Questions Fréquentes', 'action_faq')]
         ])
       }
@@ -303,22 +539,25 @@ function setupTelegrafHandlers(bot: Telegraf) {
   const handleReferral = async (ctx: any) => {
     const userId = String(ctx.from?.id || '000000');
     const refLink = `https://t.me/TaskifyProBot?start=ref_${userId}`;
-    userSessions[userId] = { step: 'START' };
+    const session = userSessions[userId] || { step: 'START', language: 'fr', referralsCount: 0, referralEarnings: 0 };
+    const t = getT(session.language);
 
     await ctx.reply(
-      `👥 *Programme de Parrainage ${botSettings.platformName}*\n\n` +
+      `${t.referral_title}\n\n` +
       `Invitez d'autres opérateurs et gagnez des commissions automatiques !\n\n` +
-      `💎 *Gains par tâche validée par un filleul :* \`+0.25 €\`\n` +
-      `📊 *Nombre de filleuls actifs :* \`0\`\n` +
-      `💵 *Total des commissions perçues :* \`0.00 €\`\n\n` +
+      `🎁 *Bonus direct par inscription :* \`+$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\`\n` +
+      `💎 *Commission par tâche filleul :* \`${REFERRAL_COMMISSION_PERCENT}%\` (\`+$${REFERRAL_TASK_COMMISSION_USD.toFixed(3)}\` / tâche)\n` +
+      `📊 *Nombre de filleuls actifs :* \`${session.referralsCount || 0}\`\n` +
+      `💵 *Total des commissions perçues :* \`$${(session.referralEarnings || 0).toFixed(3)}\`\n` +
+      `━━━━━━━━━━━━━━━━━━\n` +
       `🔗 *Votre lien de parrainage unique :*\n` +
       `\`${refLink}\`\n\n` +
-      `_Partagez ce lien à vos connaissances pour commencer à accumuler des revenus passifs._`,
+      `_Partagez ce lien pour commencer à accumuler des revenus passifs sur chaque tâche exécutée._`,
       {
         parse_mode: 'Markdown',
         ...MAIN_REPLY_KEYBOARD,
         ...Markup.inlineKeyboard([
-          [Markup.button.url('📤 Partager mon lien', `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent("Rejoins Taskify Pro pour gagner de l'argent !")}`)]
+          [Markup.button.url('📤 ' + t.btn_share_ref, `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent("Rejoins Taskify Pro et gagne $0.04 par tâche !")}`)]
         ])
       }
     );
@@ -327,24 +566,25 @@ function setupTelegrafHandlers(bot: Telegraf) {
   // Helper: Handle 🏆 Classement
   const handleLeaderboard = async (ctx: any) => {
     const userId = String(ctx.from?.id || 'unknown');
-    userSessions[userId] = { step: 'START' };
+    const session = userSessions[userId] || { step: 'START', language: 'fr', tasksCompleted: 0 };
+    const t = getT(session.language);
 
     await ctx.reply(
-      `🏆 *Classement des Meilleurs Opérateurs (Ce Mois)*\n\n` +
-      `1. 🥇 Opérateur #9482 — \`428 tâches\` (Prime +50.00 €)\n` +
-      `2. 🥈 Opérateur #1092 — \`391 tâches\` (Prime +30.00 €)\n` +
-      `3. 🥉 Opérateur #7401 — \`315 tâches\` (Prime +15.00 €)\n` +
+      `${t.leaderboard_title}\n\n` +
+      `1. 🥇 Opérateur #9482 — \`428 tâches\` (Prime +$50.00)\n` +
+      `2. 🥈 Opérateur #1092 — \`391 tâches\` (Prime +$30.00)\n` +
+      `3. 🥉 Opérateur #7401 — \`315 tâches\` (Prime +$15.00)\n` +
       `4. ⭐ Opérateur #5892 — \`280 tâches\`\n` +
       `5. ⭐ Opérateur #3419 — \`204 tâches\`\n\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
-      `📍 *Votre Position :* \`Top 15%\`\n` +
-      `📊 *Vos Tâches :* \`0 validées\`\n\n` +
+      `📍 *Votre Position :* \`${(session.tasksCompleted || 0) > 0 ? 'Top 15%' : 'Non classé'}\`\n` +
+      `📊 *Vos Tâches :* \`${session.tasksCompleted || 0} validées\` (\`$${((session.tasksCompleted || 0) * TASK_REWARD_USD).toFixed(2)}\`)\n\n` +
       `_Primes versées automatiquement chaque 1er du mois aux 3 premiers du classement._`,
       {
         parse_mode: 'Markdown',
         ...MAIN_REPLY_KEYBOARD,
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('🚀 Faire des tâches pour grimper', 'task_facebook')]
+          [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')]
         ])
       }
     );
@@ -353,11 +593,20 @@ function setupTelegrafHandlers(bot: Telegraf) {
   // Helper: Handle 🪩 Langue
   const handleLanguage = async (ctx: any) => {
     const userId = String(ctx.from?.id || 'unknown');
-    userSessions[userId] = { step: 'START' };
+    const session = userSessions[userId] || { step: 'START', language: 'fr' };
+    const currentLang = session.language || 'fr';
+
+    const langNames: Record<string, string> = {
+      fr: '🇫🇷 Français',
+      en: '🇬🇧 English',
+      ru: '🇷🇺 Русский',
+      es: '🇪🇸 Español',
+      id: '🇮🇩 Bahasa Indonesia'
+    };
 
     await ctx.reply(
-      `🪩 *Sélection de la Langue / Language / Fiteny*\n\n` +
-      `Langue active : 🇫🇷 *Français*\n\n` +
+      `🪩 *Sélection de la Langue / Language Selection / Выбор языка*\n\n` +
+      `Langue active : *${langNames[currentLang] || '🇫🇷 Français'}*\n\n` +
       `Choisissez votre langue de préférence ci-dessous :`,
       {
         parse_mode: 'Markdown',
@@ -365,8 +614,14 @@ function setupTelegrafHandlers(bot: Telegraf) {
         ...Markup.inlineKeyboard([
           [
             Markup.button.callback('🇫🇷 Français', 'set_lang_fr'),
-            Markup.button.callback('🇲🇬 Malagasy', 'set_lang_mg'),
             Markup.button.callback('🇬🇧 English', 'set_lang_en')
+          ],
+          [
+            Markup.button.callback('🇷🇺 Русский', 'set_lang_ru'),
+            Markup.button.callback('🇪🇸 Español', 'set_lang_es')
+          ],
+          [
+            Markup.button.callback('🇮🇩 Bahasa Indonesia', 'set_lang_id')
           ]
         ])
       }
@@ -374,75 +629,140 @@ function setupTelegrafHandlers(bot: Telegraf) {
   };
 
   // 1. 💰 Solde
-  bot.hears(['💰 Solde', '💰 Solde / Gains', 'Solde', 'solde', '/balance', '/solde'], handleBalance);
+  bot.hears(['💰 Solde', '💰 Solde / Balance', 'Solde', 'solde', 'Balance', 'balance', 'Баланс', 'баланс', 'Saldo', 'saldo', '/balance', '/solde'], handleBalance);
 
   // 2. 📋 Tâches & 🌐 Démarrer tâche Facebook
   bot.hears([
-    '📋 Tâches',
-    '📋 Taches',
-    'Tâches',
-    'Taches',
-    '🌐 Démarrer tâche Facebook',
-    '🌐 Démarrer tâche',
-    'Démarrer tâche Facebook',
-    'Démarrer tâche',
-    '/tasks',
-    '/taches',
-    '/task'
+    '📋 Tâches', '📋 Tâches / Tasks', '📋 Taches', 'Tâches', 'Taches',
+    'Tasks', 'tasks', 'Задания', 'задания', 'Задачи', 'Tareas', 'tareas', 'Tugas', 'tugas',
+    '🌐 Démarrer tâche Facebook', '🌐 Démarrer tâche', 'Démarrer tâche Facebook', 'Démarrer tâche',
+    '/tasks', '/taches', '/task'
   ], handleTasks);
 
   // 3. 🏦 Retrait
-  bot.hears(['🏦 Retrait', '🏦 Demander Retrait', 'Retrait', 'retrait', '/withdraw', '/retrait'], handleWithdrawal);
+  bot.hears(['🏦 Retrait', '🏦 Retrait / Withdraw', 'Retrait', 'retrait', 'Withdraw', 'withdraw', 'Вывод', 'вывод', 'Retiro', 'retiro', 'Penarikan', 'penarikan', '/withdraw', '/retrait'], handleWithdrawal);
 
   // 4. 📞 Support
-  bot.hears(['📞 Support', '📞 Assistance', 'Support', 'support', 'Assistance', '/support'], handleSupport);
+  bot.hears(['📞 Support', 'Support', 'support', 'Assistance', 'assistance', 'Поддержка', 'поддержка', 'Soporte', 'soporte', 'Dukungan', 'dukungan', '/support'], handleSupport);
 
   // 5. 👥 Parrainages
-  bot.hears(['👥 Parrainages', '👥 Parrainage', 'Parrainages', 'Parrainage', '/referral', '/parrainage'], handleReferral);
+  bot.hears(['👥 Parrainages', '👥 Parrainages / Referrals', '👥 Parrainage', 'Parrainages', 'Parrainage', 'parrainage', 'Referral', 'referral', 'Referrals', 'Рефералы', 'Referidos', 'Rujukan', '/referral', '/parrainage'], handleReferral);
 
   // 6. 🏆 Classement
-  bot.hears(['🏆 Classement', '🏆 Top Opérateurs', 'Classement', 'classement', '/leaderboard', '/top'], handleLeaderboard);
+  bot.hears(['🏆 Classement', '🏆 Classement / Top', 'Classement', 'classement', 'Leaderboard', 'leaderboard', 'Top', 'top', 'Рейтинг', 'Clasificación', 'Peringkat', '/leaderboard', '/top'], handleLeaderboard);
 
   // 7. 🪩 Langue
-  bot.hears(['🪩 Langue', '🪩 Langues', 'Langue', 'langue', 'Language', '/language', '/langue'], handleLanguage);
+  bot.hears(['🪩 Langue', '🪩 Langue / Language', '🪩 Langues', 'Langue', 'langue', 'Language', 'language', 'Язык', 'язык', 'Idioma', 'idioma', 'Bahasa', 'bahasa', '/language', '/langue'], handleLanguage);
 
-  bot.action(['lang_fr', 'set_lang_fr'], async (ctx) => {
-    await ctx.answerCbQuery('Langue : Français');
-    await renderScreen(ctx, '✅ Langue configurée en **Français**.', {
+  // Language Actions
+  bot.action('set_lang_fr', async (ctx) => {
+    const userId = String(ctx.from?.id || 'unknown');
+    if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
+    userSessions[userId].language = 'fr';
+    await ctx.answerCbQuery('Langue : Français 🇫🇷 configuré !');
+    const t = getT('fr');
+    await renderScreen(ctx, t.lang_confirm, {
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('📋 Voir les Tâches', 'task_facebook')],
-        [Markup.button.callback('💰 Consulter mon Solde', 'action_check_balance')]
+        [Markup.button.callback('📋 ' + t.btn_tasks, 'task_facebook')],
+        [Markup.button.callback('💰 ' + t.btn_withdraw, 'action_request_withdrawal')]
       ])
     });
   });
 
-  bot.action(['lang_mg', 'set_lang_mg'], async (ctx) => {
-    await ctx.answerCbQuery('Fiteny : Malagasy');
-    await renderScreen(ctx, '✅ Voafaritra amin\'ny teny **Malagasy** ny bot.', {
+  bot.action('set_lang_en', async (ctx) => {
+    const userId = String(ctx.from?.id || 'unknown');
+    if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
+    userSessions[userId].language = 'en';
+    await ctx.answerCbQuery('Language: English 🇬🇧 set!');
+    const t = getT('en');
+    await renderScreen(ctx, t.lang_confirm, {
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('📋 Hanao Asa (Tâches)', 'task_facebook')],
-        [Markup.button.callback('💰 Hijery Solde', 'action_check_balance')]
+        [Markup.button.callback('📋 ' + t.btn_tasks, 'task_facebook')],
+        [Markup.button.callback('💰 ' + t.btn_withdraw, 'action_request_withdrawal')]
       ])
     });
   });
 
-  bot.action(['lang_en', 'set_lang_en'], async (ctx) => {
-    await ctx.answerCbQuery('Language: English');
-    await renderScreen(ctx, '🌐 Language updated to **English**.', {
+  bot.action('set_lang_ru', async (ctx) => {
+    const userId = String(ctx.from?.id || 'unknown');
+    if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
+    userSessions[userId].language = 'ru';
+    await ctx.answerCbQuery('Язык: Русский 🇷🇺 выбран!');
+    const t = getT('ru');
+    await renderScreen(ctx, t.lang_confirm, {
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('📋 View Tasks', 'task_facebook')],
-        [Markup.button.callback('💰 Check Balance', 'action_check_balance')]
+        [Markup.button.callback('📋 ' + t.btn_tasks, 'task_facebook')],
+        [Markup.button.callback('💰 ' + t.btn_withdraw, 'action_request_withdrawal')]
+      ])
+    });
+  });
+
+  bot.action('set_lang_es', async (ctx) => {
+    const userId = String(ctx.from?.id || 'unknown');
+    if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
+    userSessions[userId].language = 'es';
+    await ctx.answerCbQuery('Idioma: Español 🇪🇸 configurado!');
+    const t = getT('es');
+    await renderScreen(ctx, t.lang_confirm, {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📋 ' + t.btn_tasks, 'task_facebook')],
+        [Markup.button.callback('💰 ' + t.btn_withdraw, 'action_request_withdrawal')]
+      ])
+    });
+  });
+
+  bot.action('set_lang_id', async (ctx) => {
+    const userId = String(ctx.from?.id || 'unknown');
+    if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
+    userSessions[userId].language = 'id';
+    await ctx.answerCbQuery('Bahasa: Indonesia 🇮🇩 dipilih!');
+    const t = getT('id');
+    await renderScreen(ctx, t.lang_confirm, {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📋 ' + t.btn_tasks, 'task_facebook')],
+        [Markup.button.callback('💰 ' + t.btn_withdraw, 'action_request_withdrawal')]
       ])
     });
   });
 
   // Retrait Sub-actions
+  bot.action('action_request_withdrawal', async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = String(ctx.from?.id || 'unknown');
+    const session = userSessions[userId] || { step: 'START', language: 'fr', balance: 0 };
+    const t = getT(session.language);
+    const balance = session.balance || 0;
+
+    if (balance < MIN_WITHDRAWAL_USD) {
+      return renderScreen(
+        ctx,
+        `⚠️ *Solde Insuffisant*\n\n` +
+        `Votre solde actuel est de *${balance.toFixed(3)} $* USD.\n` +
+        `Le montant minimum requis pour un retrait est de *${MIN_WITHDRAWAL_USD.toFixed(2)} $* USD.\n\n` +
+        `Complétez encore *${Math.max(1, Math.ceil((MIN_WITHDRAWAL_USD - balance) / TASK_REWARD_USD))} tâches* pour atteindre le seuil de paiement !`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')]
+        ])
+      );
+    }
+
+    await renderScreen(
+      ctx,
+      `🏦 *Sélectionnez votre méthode de retrait :*`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🪙 Crypto USDT (TRC-20 / BEP-20)', 'withdraw_crypto')],
+        [Markup.button.callback('📱 Mobile Money (MVola/Orange/Airtel)', 'withdraw_mobile_money')],
+        [Markup.button.callback('💳 Virement Bancaire (SEPA)', 'withdraw_bank')]
+      ])
+    );
+  });
+
   bot.action('withdraw_mobile_money', async (ctx) => {
     await ctx.answerCbQuery();
     await renderScreen(
       ctx,
       `📱 *Retrait Mobile Money (MVola, Orange Money, Airtel Money)*\n\n` +
-      `Le montant minimum de retrait est de *10.00 €*.\n` +
+      `Le montant minimum de retrait est de *${MIN_WITHDRAWAL_USD.toFixed(2)} $* USD.\n` +
       `Pour soumettre une demande manuelle immédiate, écrivez au support : @TaskifySupport`,
       Markup.inlineKeyboard([
         [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
@@ -456,7 +776,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
     await renderScreen(
       ctx,
       `🪙 *Retrait Crypto USDT (TRC20 / BEP20)*\n\n` +
-      `Frais de réseau : 0 € (Pris en charge).\n` +
+      `Frais de réseau : 0 $ (Pris en charge).\n` +
       `Transmettez votre adresse USDT directement à l'administrateur : @TaskifySupport`,
       Markup.inlineKeyboard([
         [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
@@ -469,7 +789,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
     await ctx.answerCbQuery();
     await renderScreen(
       ctx,
-      `💳 *Virement Bancaire (SEPA)*\n\n` +
+      `💳 *Virement Bancaire (SEPA / International)*\n\n` +
       `Délai de traitement : 24h à 48h ouvrées.\n` +
       `Transmettez vos coordonnées bancaires (IBAN/BIC) à @TaskifySupport`,
       Markup.inlineKeyboard([
@@ -484,10 +804,9 @@ function setupTelegrafHandlers(bot: Telegraf) {
     await renderScreen(
       ctx,
       `❓ *FAQ & Questions Fréquentes*\n\n` +
-      `• *Quand mes tâches sont-elles validées ?*\n` +
-      `Instantanément dès réception de l'UID et des cookies complets.\n\n` +
-      `• *Quand puis-je retirer ?*\n` +
-      `Dès que vous atteignez le seuil de 10.00 €.\n\n` +
+      `• *Rémunération par tâche :* $${TASK_REWARD_USD.toFixed(2)} USD par compte validé.\n` +
+      `• *Parrainage :* $${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)} bonus + ${REFERRAL_COMMISSION_PERCENT}% ($${REFERRAL_TASK_COMMISSION_USD.toFixed(3)}) récurrent par tâche.\n` +
+      `• *Seuil de retrait :* Retrait dès $${MIN_WITHDRAWAL_USD.toFixed(2)} USD via Crypto ou Mobile Money.\n` +
       `• *Besoin d'aide ?* Écrivez à @TaskifySupport`,
       Markup.inlineKeyboard([
         [Markup.button.callback('🚀 Démarrer une Tâche', 'task_facebook')]
@@ -497,29 +816,15 @@ function setupTelegrafHandlers(bot: Telegraf) {
 
   bot.action('action_task_rules', async (ctx) => {
     await ctx.answerCbQuery();
+    const userId = String(ctx.from?.id || 'unknown');
+    const session = userSessions[userId] || { language: 'fr' };
+    const t = getT(session.language);
+
     await renderScreen(
       ctx,
-      `📋 *Règles de Création Facebook*\n\n` +
-      `1. Utilisez le nom français et mot de passe attribués.\n` +
-      `2. Exportez les cookies complets au format standard.\n` +
-      `3. Ne réutilisez pas le même UID deux fois.`,
+      t.task_rules_text,
       Markup.inlineKeyboard([
         [Markup.button.callback('✅ Compris, démarrer', 'task_facebook')]
-      ])
-    );
-  });
-
-  bot.action('task_help', async (ctx) => {
-    await ctx.answerCbQuery();
-    await renderScreen(
-      ctx,
-      `📌 *${botSettings.platformName} (@TaskifyProBot) - Aide*\n\n` +
-      `Ce bot permet d'automatiser la collecte et l'enregistrement sécurisé des comptes de travail.\n\n` +
-      `1. Cliquez sur "📋 Tâches" puis "🌐 Facebook".\n` +
-      `2. Choisissez l'option "Cookies" pour générer une identité française.\n` +
-      `3. Cliquez sur "📤 Envoie UID", transmettez votre UID puis collez vos cookies.`,
-      Markup.inlineKeyboard([
-        [Markup.button.callback('🌐 Démarrer Facebook', 'task_facebook')]
       ])
     );
   });
@@ -527,15 +832,25 @@ function setupTelegrafHandlers(bot: Telegraf) {
   bot.action('task_facebook', async (ctx) => {
     await ctx.answerCbQuery();
     const userId = String(ctx.from?.id || 'unknown');
-    userSessions[userId] = { step: 'AUTH_CHOICE', taskType: 'Facebook' };
+    if (!userSessions[userId]) userSessions[userId] = { step: 'AUTH_CHOICE', taskType: 'Facebook', language: 'fr' };
+    else {
+      userSessions[userId].step = 'AUTH_CHOICE';
+      userSessions[userId].taskType = 'Facebook';
+    }
+    const t = getT(userSessions[userId].language);
 
     await renderScreen(
       ctx,
-      `🌐 *Tâche : Facebook*\n\nChoisissez votre méthode d'authentification :`,
+      `${t.tasks_title}\n\n` +
+      `💵 *Rémunération par compte validé :* \`$${TASK_REWARD_USD.toFixed(2)}\`\n\n` +
+      `Choisissez votre méthode d'authentification :`,
       Markup.inlineKeyboard([
-        [Markup.button.callback('🍪 Cookies', 'auth_cookies')],
-        [Markup.button.callback('🔐 2FA', 'auth_2fa')],
-        [Markup.button.callback('❌ Annuler', 'action_cancel')]
+        [
+          Markup.button.callback(t.btn_cookies, 'auth_cookies'),
+          Markup.button.callback(t.btn_2fa, 'auth_2fa')
+        ],
+        [Markup.button.callback(t.btn_rules, 'action_task_rules')],
+        [Markup.button.callback(t.btn_cancel, 'action_cancel')]
       ])
     );
   });
@@ -543,7 +858,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
   bot.action('auth_2fa', async (ctx) => {
     await ctx.answerCbQuery();
     const userId = String(ctx.from?.id || 'unknown');
-    userSessions[userId] = { step: 'START' };
+    if (userSessions[userId]) userSessions[userId].step = 'START';
 
     await renderScreen(
       ctx,
@@ -560,8 +875,13 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     const { firstName, lastName } = generateRandomName();
     const currentPassword = botSettings.customPassword || 'TaskPassword@2025!';
+    const userLang = userSessions[userId]?.language || 'fr';
+    const t = getT(userLang);
+
+    if (!userSessions[userId]) userSessions[userId] = { step: 'CREDENTIALS_SHOWN', language: userLang };
 
     userSessions[userId] = {
+      ...userSessions[userId],
       step: 'CREDENTIALS_SHOWN',
       taskType: 'Facebook',
       firstName,
@@ -574,12 +894,13 @@ function setupTelegrafHandlers(bot: Telegraf) {
       `⚠️ *Informations du compte Facebook*\n\n` +
       `✅ Prénom : \`${firstName}\`\n` +
       `✅ Nom : \`${lastName}\`\n` +
-      `🇫🇷 Mot de passe : \`${currentPassword}\`\n\n` +
-      `🔻 Une fois le compte créé, envoyez votre UID.`,
+      `🔑 Mot de passe : \`${currentPassword}\`\n` +
+      `💵 Gain : \`$${TASK_REWARD_USD.toFixed(2)} USD\`\n\n` +
+      `🔻 Une fois le compte créé, envoyez votre UID :`,
       Markup.inlineKeyboard([
-        [Markup.button.callback('📥 Envoyer l\'UID', 'action_send_uid')],
+        [Markup.button.callback(t.btn_send_uid, 'action_send_uid')],
         [Markup.button.callback('🔙 Retour', 'task_facebook')],
-        [Markup.button.callback('❌ Annuler le processus', 'action_cancel')]
+        [Markup.button.callback(t.btn_cancel, 'action_cancel')]
       ])
     );
   });
@@ -588,16 +909,17 @@ function setupTelegrafHandlers(bot: Telegraf) {
     await ctx.answerCbQuery();
     const userId = String(ctx.from?.id || 'unknown');
     if (!userSessions[userId]) {
-      userSessions[userId] = { step: 'AWAITING_UID' };
+      userSessions[userId] = { step: 'AWAITING_UID', language: 'fr' };
     } else {
       userSessions[userId].step = 'AWAITING_UID';
     }
+    const t = getT(userSessions[userId].language);
 
     await renderScreen(
       ctx,
-      `✍️ *Étape 1/2 : Envoi de l'UID*\n\nVeuillez coller et envoyer votre **UID Facebook** (ex: \`100098472910\`) :`,
+      t.awaiting_uid,
       Markup.inlineKeyboard([
-        [Markup.button.callback('❌ Annulation processus', 'action_cancel')]
+        [Markup.button.callback(t.btn_cancel, 'action_cancel')]
       ])
     );
   });
@@ -606,15 +928,18 @@ function setupTelegrafHandlers(bot: Telegraf) {
     await ctx.answerCbQuery();
     const userFirstName = ctx.from?.first_name || 'Utilisateur';
     const userId = String(ctx.from?.id || 'unknown');
+    const session = userSessions[userId] || { balance: 0, tasksCompleted: 0, language: 'fr' };
+    const t = getT(session.language);
+
     await renderScreen(
       ctx,
-      `💰 *Votre Solde Actuel :* \`0.00 €\`\n` +
+      `💰 *Votre Solde Actuel :* \`$${(session.balance || 0).toFixed(3)} USD\`\n` +
       `👤 *Utilisateur :* ${userFirstName} (ID: \`${userId}\`)\n` +
-      `📊 *Tâches complétées :* \`0\`\n` +
-      `⏳ *En attente :* \`0.00 €\``,
+      `📊 *Tâches complétées :* \`${session.tasksCompleted || 0}\`\n` +
+      `⏳ *En attente :* \`$0.000\``,
       Markup.inlineKeyboard([
-        [Markup.button.callback('🚀 Nouvelle Tâche Facebook', 'task_facebook')],
-        [Markup.button.callback('🏦 Demander un Retrait', 'withdraw_mobile_money')]
+        [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')],
+        [Markup.button.callback('🏦 ' + t.btn_withdraw, 'action_request_withdrawal')]
       ])
     );
   });
@@ -622,13 +947,15 @@ function setupTelegrafHandlers(bot: Telegraf) {
   bot.action('action_cancel', async (ctx) => {
     await ctx.answerCbQuery();
     const userId = String(ctx.from?.id || 'unknown');
+    const lang = userSessions[userId]?.language || 'fr';
     delete userSessions[userId];
+    const t = getT(lang);
 
     await renderScreen(
       ctx,
-      `❌ *Processus annulé.*\n\nAucune donnée n'a été enregistrée. Utilisez le menu ci-dessous ou cliquez pour recommencer :`,
+      t.cancelled + `\n\nUtilisez le menu permanent ou cliquez pour recommencer :`,
       Markup.inlineKeyboard([
-        [Markup.button.callback('🚀 Démarrer une tâche', 'task_facebook')]
+        [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')]
       ])
     );
   });
@@ -639,27 +966,29 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const text = ctx.message.text.trim();
     const lowerText = text.toLowerCase();
     const session = userSessions[userId];
+    const userLang = session?.language || 'fr';
+    const t = getT(userLang);
 
     // Instant Priority Dispatch for Persistent Keyboard Buttons
-    if (text.includes('Solde') || lowerText === 'solde' || lowerText === '/solde' || lowerText === '/balance') {
+    if (text.includes('Solde') || lowerText === 'solde' || lowerText === '/solde' || text.includes('Balance') || lowerText === 'balance' || lowerText === '/balance' || text.includes('Баланс') || text.includes('Saldo')) {
       return handleBalance(ctx);
     }
-    if (text.includes('Tâches') || text.includes('Taches') || text.includes('Démarrer tâche') || lowerText === 'taches' || lowerText === 'tâches' || lowerText === '/tasks' || lowerText === '/taches') {
+    if (text.includes('Tâches') || text.includes('Taches') || text.includes('Tasks') || text.includes('Задания') || text.includes('Tareas') || text.includes('Tugas') || lowerText === 'taches' || lowerText === 'tâches' || lowerText === '/tasks' || lowerText === '/taches') {
       return handleTasks(ctx);
     }
-    if (text.includes('Retrait') || lowerText === 'retrait' || lowerText === '/withdraw' || lowerText === '/retrait') {
+    if (text.includes('Retrait') || text.includes('Withdraw') || text.includes('Вывод') || text.includes('Retiro') || text.includes('Penarikan') || lowerText === 'retrait' || lowerText === '/withdraw') {
       return handleWithdrawal(ctx);
     }
-    if (text.includes('Support') || text.includes('Assistance') || lowerText === 'support' || lowerText === '/support') {
+    if (text.includes('Support') || text.includes('Assistance') || text.includes('Поддержка') || text.includes('Soporte') || text.includes('Dukungan') || lowerText === 'support' || lowerText === '/support') {
       return handleSupport(ctx);
     }
-    if (text.includes('Parrainage') || text.includes('Parrainages') || lowerText === 'parrainage' || lowerText === '/referral') {
+    if (text.includes('Parrainage') || text.includes('Parrainages') || text.includes('Referral') || text.includes('Referrals') || text.includes('Рефералы') || text.includes('Referidos') || text.includes('Rujukan') || lowerText === 'parrainage' || lowerText === '/referral') {
       return handleReferral(ctx);
     }
-    if (text.includes('Classement') || lowerText === 'classement' || lowerText === '/leaderboard' || lowerText === '/top') {
+    if (text.includes('Classement') || text.includes('Leaderboard') || text.includes('Рейтинг') || text.includes('Clasificación') || text.includes('Peringkat') || lowerText === 'classement' || lowerText === '/leaderboard' || lowerText === '/top') {
       return handleLeaderboard(ctx);
     }
-    if (text.includes('Langue') || text.includes('Langues') || lowerText === 'langue' || lowerText === 'language' || lowerText === '/language') {
+    if (text.includes('Langue') || text.includes('Language') || text.includes('Язык') || text.includes('Idioma') || text.includes('Bahasa') || lowerText === 'langue' || lowerText === 'language' || lowerText === '/language') {
       return handleLanguage(ctx);
     }
 
@@ -670,8 +999,8 @@ function setupTelegrafHandlers(bot: Telegraf) {
           parse_mode: 'Markdown',
           ...MAIN_REPLY_KEYBOARD,
           ...Markup.inlineKeyboard([
-            [Markup.button.callback('🚀 Démarrer une Tâche Facebook', 'task_facebook')],
-            [Markup.button.callback('💰 Voir mon Solde', 'action_check_balance')]
+            [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')],
+            [Markup.button.callback('💰 ' + t.balance_title.split('*')[1] || 'Solde', 'action_check_balance')]
           ])
         }
       );
@@ -682,13 +1011,11 @@ function setupTelegrafHandlers(bot: Telegraf) {
       session.step = 'AWAITING_COOKIES';
 
       await ctx.reply(
-        `✅ *UID reçu avec succès :* \`${text}\`\n\n` +
-        `🍪 *Étape 2/2 : Envoi des Cookies*\n\n` +
-        `Veuillez maintenant coller vos **Cookies Facebook** (format texte ou JSON) :`,
+        `✅ *UID reçu avec succès :* \`${text}\`\n\n` + t.awaiting_cookies,
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
-            [Markup.button.callback('❌ Annulation processus', 'action_cancel')]
+            [Markup.button.callback(t.btn_cancel, 'action_cancel')]
           ])
         }
       );
@@ -697,109 +1024,117 @@ function setupTelegrafHandlers(bot: Telegraf) {
 
     if (session.step === 'AWAITING_COOKIES') {
       session.cookies = text;
-      
-      const newRecord = {
+
+      const createdTask = {
         id: `task-${Date.now()}`,
-        uid: session.uid || 'Non fourni',
-        cookies: session.cookies || '',
-        firstName: session.firstName || 'Généré',
-        lastName: session.lastName || 'Auto',
+        uid: session.uid || '1000' + Math.floor(Math.random() * 90000000000),
+        cookies: session.cookies,
+        firstName: session.firstName || 'Alexandre',
+        lastName: session.lastName || 'Dubois',
         password: session.password || botSettings.customPassword,
         telegramUserId: userId,
         telegramUsername: username,
         status: 'compte créé' as const,
-        notes: 'Enregistré automatiquement via Telegram Bot',
+        notes: `Enregistré via ${botSettings.platformName} (@TaskifyProBot)`,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         syncedToGoogleSheets: false,
         taskType: session.taskType || 'Facebook'
       };
 
-      tasks.unshift(newRecord);
-      addLog('success', 'telegram', `Tâche terminée pour @${username} (UID: ${newRecord.uid})`, newRecord);
+      tasks.unshift(createdTask);
+      addLog('success', 'telegram', `🎉 Tâche reçue via Bot Telegram (UID: ${createdTask.uid})`, createdTask);
 
       // Async sync to Google Sheets
-      syncRowToGoogleSheets(newRecord).then(res => {
-        if (res.success) {
-          newRecord.syncedToGoogleSheets = true;
-        }
-      });
+      if (botSettings.googleSheetWebhookUrl) {
+        syncRowToGoogleSheets(createdTask).then(res => {
+          if (res.success) createdTask.syncedToGoogleSheets = true;
+        });
+      }
 
-      // Clear session
-      delete userSessions[userId];
+      // Update Ledger
+      session.balance = (session.balance || 0) + TASK_REWARD_USD;
+      session.tasksCompleted = (session.tasksCompleted || 0) + 1;
+      const currentBal = session.balance;
+
+      delete userSessions[userId].step;
 
       await ctx.reply(
-        `🎉 *Tâche terminée avec succès !*\n\n` +
-        `✅ *Vos informations ont été validées et sauvegardées.* \n\n` +
-        `🆔 *UID :* \`${newRecord.uid}\`\n` +
-        `👤 *Nom complet :* ${newRecord.firstName} ${newRecord.lastName}\n` +
-        `🔑 *Mot de passe :* \`${newRecord.password}\`\n` +
+        `🎉 *Tâche validée avec succès !*\n\n` +
+        `✅ Vos informations ont été enregistrées avec succès et synchronisées.\n` +
+        `💵 *+$${TASK_REWARD_USD.toFixed(2)} USD* crédités sur votre solde disponible !\n\n` +
+        `🆔 *UID :* \`${createdTask.uid}\`\n` +
+        `👤 *Nom complet :* ${createdTask.firstName} ${createdTask.lastName}\n` +
+        `🔑 *Mot de passe :* \`${createdTask.password}\`\n` +
+        `💰 *Nouveau solde :* \`$${currentBal.toFixed(3)} USD\`\n` +
         `📅 *Date :* ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}\n\n` +
-        `Merci pour votre contribution !`,
+        `_Merci pour votre travail ! Vous pouvez relancer une tâche ci-dessous._`,
         {
           parse_mode: 'Markdown',
           ...MAIN_REPLY_KEYBOARD,
           ...Markup.inlineKeyboard([
-            [Markup.button.callback('🚀 Nouvelle Tâche Facebook', 'task_facebook')]
+            [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')],
+            [Markup.button.callback('💰 ' + t.btn_withdraw, 'action_request_withdrawal')]
           ])
         }
       );
     }
   });
+
+  bot.catch((err: any, ctx: any) => {
+    console.error(`[Telegraf Error] Exception pour ${ctx.from?.id}:`, err.message);
+    addLog('error', 'telegram', `Erreur Telegram: ${err.message}`);
+  });
 }
 
 // ----------------------------------------------------
-// API ROUTES
+// REST API ENDPOINTS
 // ----------------------------------------------------
 
 // 1. Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    platform: botSettings.platformName,
+    activeTasks: tasks.length,
+    isBotActive: botSettings.isBotActive,
+    sheetsSyncConfigured: Boolean(botSettings.googleSheetWebhookUrl),
+    financials: {
+      taskRewardUSD: TASK_REWARD_USD,
+      referralSignupBonusUSD: REFERRAL_SIGNUP_BONUS_USD,
+      referralTaskCommissionPercent: REFERRAL_COMMISSION_PERCENT,
+      minWithdrawalUSD: MIN_WITHDRAWAL_USD
+    },
+    supportedLanguages: ['fr', 'en', 'ru', 'es', 'id']
+  });
 });
 
-// 2. Tasks list
+// 2. Get all tasks
 app.get('/api/tasks', (req, res) => {
-  const { search, status, sort } = req.query;
-  let result = [...tasks];
-
-  if (status && status !== 'all') {
-    result = result.filter(t => t.status === status);
-  }
-
-  if (search) {
-    const q = String(search).toLowerCase();
-    result = result.filter(t => 
-      t.uid.toLowerCase().includes(q) ||
-      t.firstName.toLowerCase().includes(q) ||
-      t.lastName.toLowerCase().includes(q) ||
-      t.telegramUsername.toLowerCase().includes(q) ||
-      t.telegramUserId.toLowerCase().includes(q)
-    );
-  }
-
-  res.json(result);
+  res.json(tasks);
 });
 
-// 3. Create task (manual or webhook)
-app.post('/api/tasks', (req, res) => {
-  const { uid, cookies, firstName, lastName, password, telegramUserId, telegramUsername, status, notes, taskType } = req.body;
+// 3. Create task manually / from simulator
+app.post('/api/tasks', async (req, res) => {
+  const { uid, cookies, firstName, lastName, password, telegramUserId, telegramUsername, notes, taskType } = req.body;
   
-  if (!uid) {
-    return res.status(400).json({ error: 'UID is required' });
+  if (!uid || !cookies) {
+    return res.status(400).json({ error: 'UID et Cookies obligatoires' });
   }
 
-  const generated = generateRandomName();
+  const identity = (!firstName || !lastName) ? generateRandomName() : { firstName, lastName };
+
   const newTask = {
     id: `task-${Date.now()}`,
-    uid: String(uid).trim(),
-    cookies: String(cookies || '').trim(),
-    firstName: firstName || generated.firstName,
-    lastName: lastName || generated.lastName,
+    uid,
+    cookies,
+    firstName: identity.firstName,
+    lastName: identity.lastName,
     password: password || botSettings.customPassword,
-    telegramUserId: telegramUserId || 'manual_admin',
-    telegramUsername: telegramUsername || 'admin_portal',
-    status: (status || 'compte créé') as any,
-    notes: notes || 'Ajouté manuellement depuis le Dashboard',
+    telegramUserId: telegramUserId || 'sim_dashboard',
+    telegramUsername: telegramUsername || 'dashboard_operator',
+    status: 'compte créé' as const,
+    notes: notes || `Créé via ${botSettings.platformName}`,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     syncedToGoogleSheets: false,
@@ -807,36 +1142,39 @@ app.post('/api/tasks', (req, res) => {
   };
 
   tasks.unshift(newTask);
-  addLog('info', 'system', `Nouvelle tâche ajoutée manuellement (UID: ${newTask.uid})`);
+  addLog('success', 'system', `Nouvelle tâche enregistrée (UID: ${uid})`, newTask);
 
-  // Try sync
+  // Sync to Google Sheets if configured
   if (botSettings.googleSheetWebhookUrl) {
-    syncRowToGoogleSheets(newTask).then(r => {
-      if (r.success) newTask.syncedToGoogleSheets = true;
+    syncRowToGoogleSheets(newTask).then(result => {
+      if (result.success) {
+        newTask.syncedToGoogleSheets = true;
+      }
     });
   }
 
-  res.json(newTask);
+  res.status(201).json(newTask);
 });
 
-// 4. Update task (status change: 'compte créé' <-> 'compte suspendu' <-> 'vérifié', notes)
-app.patch('/api/tasks/:id', (req, res) => {
+// 4. Update task
+app.put('/api/tasks/:id', (req, res) => {
   const { id } = req.params;
-  const { status, notes } = req.body;
-
   const taskIndex = tasks.findIndex(t => t.id === id);
+
   if (taskIndex === -1) {
-    return res.status(400).json({ error: 'Task not found' });
+    return res.status(400).json({ error: 'Tâche non trouvée' });
   }
 
-  if (status) tasks[taskIndex].status = status;
-  if (notes !== undefined) tasks[taskIndex].notes = notes;
-  tasks[taskIndex].updatedAt = new Date().toISOString();
+  tasks[taskIndex] = {
+    ...tasks[taskIndex],
+    ...req.body,
+    updatedAt: new Date().toISOString()
+  };
 
   addLog(
-    status === 'compte suspendu' ? 'warning' : 'info',
+    'info',
     'system',
-    `Statut mis à jour pour ${tasks[taskIndex].uid}: "${status || 'notes éditées'}"`
+    `Tâche mise à jour (UID: ${tasks[taskIndex].uid}, Statut: ${tasks[taskIndex].status})`
   );
 
   res.json(tasks[taskIndex]);
@@ -875,9 +1213,18 @@ app.post('/api/bot/simulate-step', (req, res) => {
   const { sessionId = 'sim-user-1', action, input } = req.body;
   
   if (!userSessions[sessionId]) {
-    userSessions[sessionId] = { step: 'START' };
+    userSessions[sessionId] = {
+      step: 'START',
+      language: 'fr',
+      balance: 0.000,
+      tasksCompleted: 0,
+      referralsCount: 0,
+      referralEarnings: 0.000
+    };
   }
   const session = userSessions[sessionId];
+  const currentLang = session.language || 'fr';
+  const t = getT(currentLang);
 
   let responseMessage = '';
   let buttons: any[] = [];
@@ -885,25 +1232,36 @@ app.post('/api/bot/simulate-step', (req, res) => {
   const inputText = (input || '').trim();
   const lowerInput = inputText.toLowerCase();
 
-  // Natural text or action dispatch for persistent buttons
+  // Natural text or action dispatch for persistent buttons across 5 languages
   if (
     normalizedAction === 'MENU_BALANCE' ||
     normalizedAction === '💰 Solde' ||
+    normalizedAction === '💰 Solde / Balance' ||
     inputText.includes('Solde') ||
+    inputText.includes('Balance') ||
+    inputText.includes('Баланс') ||
+    inputText.includes('Saldo') ||
     lowerInput === 'solde' ||
     lowerInput === '/solde' ||
+    lowerInput === 'balance' ||
     lowerInput === '/balance'
   ) {
     normalizedAction = 'MENU_BALANCE';
   } else if (
     normalizedAction === 'CHOOSE_FACEBOOK' ||
     normalizedAction === '📋 Tâches' ||
+    normalizedAction === '📋 Tâches / Tasks' ||
     normalizedAction === '🌐 Démarrer tâche Facebook' ||
     inputText.includes('Tâches') ||
     inputText.includes('Taches') ||
+    inputText.includes('Tasks') ||
+    inputText.includes('Задания') ||
+    inputText.includes('Tareas') ||
+    inputText.includes('Tugas') ||
     inputText.includes('Démarrer tâche') ||
     lowerInput === 'taches' ||
     lowerInput === 'tâches' ||
+    lowerInput === 'tasks' ||
     lowerInput === '/tasks' ||
     lowerInput === '/taches'
   ) {
@@ -911,8 +1269,14 @@ app.post('/api/bot/simulate-step', (req, res) => {
   } else if (
     normalizedAction === 'MENU_WITHDRAW' ||
     normalizedAction === '🏦 Retrait' ||
+    normalizedAction === '🏦 Retrait / Withdraw' ||
     inputText.includes('Retrait') ||
+    inputText.includes('Withdraw') ||
+    inputText.includes('Вывод') ||
+    inputText.includes('Retiro') ||
+    inputText.includes('Penarikan') ||
     lowerInput === 'retrait' ||
+    lowerInput === 'withdraw' ||
     lowerInput === '/withdraw'
   ) {
     normalizedAction = 'MENU_WITHDRAW';
@@ -921,6 +1285,9 @@ app.post('/api/bot/simulate-step', (req, res) => {
     normalizedAction === '📞 Support' ||
     inputText.includes('Support') ||
     inputText.includes('Assistance') ||
+    inputText.includes('Поддержка') ||
+    inputText.includes('Soporte') ||
+    inputText.includes('Dukungan') ||
     lowerInput === 'support' ||
     lowerInput === '/support'
   ) {
@@ -928,17 +1295,29 @@ app.post('/api/bot/simulate-step', (req, res) => {
   } else if (
     normalizedAction === 'MENU_REFERRAL' ||
     normalizedAction === '👥 Parrainages' ||
+    normalizedAction === '👥 Parrainages / Referrals' ||
     inputText.includes('Parrainage') ||
     inputText.includes('Parrainages') ||
+    inputText.includes('Referral') ||
+    inputText.includes('Рефералы') ||
+    inputText.includes('Referidos') ||
+    inputText.includes('Rujukan') ||
     lowerInput === 'parrainage' ||
+    lowerInput === 'referral' ||
     lowerInput === '/referral'
   ) {
     normalizedAction = 'MENU_REFERRAL';
   } else if (
     normalizedAction === 'MENU_LEADERBOARD' ||
     normalizedAction === '🏆 Classement' ||
+    normalizedAction === '🏆 Classement / Top' ||
     inputText.includes('Classement') ||
+    inputText.includes('Leaderboard') ||
+    inputText.includes('Рейтинг') ||
+    inputText.includes('Clasificación') ||
+    inputText.includes('Peringkat') ||
     lowerInput === 'classement' ||
+    lowerInput === 'leaderboard' ||
     lowerInput === '/leaderboard' ||
     lowerInput === '/top'
   ) {
@@ -946,8 +1325,12 @@ app.post('/api/bot/simulate-step', (req, res) => {
   } else if (
     normalizedAction === 'MENU_LANGUAGE' ||
     normalizedAction === '🪩 Langue' ||
+    normalizedAction === '🪩 Langue / Language' ||
     inputText.includes('Langue') ||
-    inputText.includes('Langues') ||
+    inputText.includes('Language') ||
+    inputText.includes('Язык') ||
+    inputText.includes('Idioma') ||
+    inputText.includes('Bahasa') ||
     lowerInput === 'langue' ||
     lowerInput === 'language' ||
     lowerInput === '/language'
@@ -955,15 +1338,20 @@ app.post('/api/bot/simulate-step', (req, res) => {
     normalizedAction = 'MENU_LANGUAGE';
   }
 
+  const balance = session.balance || 0;
+  const tasksCompleted = session.tasksCompleted || 0;
+  const referralsCount = session.referralsCount || 0;
+  const referralEarnings = session.referralEarnings || 0;
+
   switch (normalizedAction) {
     case 'START':
     case '/start':
       session.step = 'START';
-      responseMessage = `👋 Bienvenue sur ${botSettings.platformName} (@TaskifyProBot) !\n\nUtilisez le menu principal ci-dessous pour gérer vos tâches, suivre vos gains ou demander un retrait.\n\n👉 Cliquez sur [ 📋 Tâches ] pour commencer.`;
+      responseMessage = t.welcome;
       buttons = [
         [
-          { text: '🌐 Facebook (1.50 € / tâche)', action: 'CHOOSE_FACEBOOK', variant: 'primary' },
-          { text: 'ℹ️ Consignes & Règles', action: 'ACTION_TASK_RULES', variant: 'secondary' }
+          { text: `🌐 Facebook ($${TASK_REWARD_USD.toFixed(2)} / tâche)`, action: 'CHOOSE_FACEBOOK', variant: 'primary' },
+          { text: t.btn_rules, action: 'ACTION_TASK_RULES', variant: 'secondary' }
         ]
       ];
       addLog('info', 'simulator', `Simulateur: /start initialisé par l'utilisateur.`);
@@ -971,38 +1359,41 @@ app.post('/api/bot/simulate-step', (req, res) => {
 
     case 'MENU_BALANCE':
       session.step = 'BALANCE';
-      responseMessage = `💰 *Votre Solde & Activité*\n\n` +
+      responseMessage = `${t.balance_title}\n\n` +
         `👤 Utilisateur : *Opérateur Simulateur* (@simulateur_user)\n` +
         `🆔 ID Compte : \`sim_${sessionId}\`\n` +
-        `🛡️ Statut du compte : *Vérifié* ✅\n\n` +
-        `💵 *Solde validé disponible :* \`0.00 €\`\n` +
-        `⏳ *En cours de validation :* \`0.00 €\`\n` +
-        `📊 *Tâches validées :* \`0\`\n` +
-        `👥 *Filleuls actifs :* \`0\` (\`+0.00 €\`)\n\n` +
-        `_Rémunération standard : 1.50 € par compte Facebook validé._`;
+        `🛡️ Statut du compte : *Vérifié* ✅\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `💵 *Solde validé disponible :* \`$${balance.toFixed(3)} USD\`\n` +
+        `⏳ *En cours de validation :* \`$0.000\`\n` +
+        `📊 *Tâches validées :* \`${tasksCompleted}\` (\`$${(tasksCompleted * TASK_REWARD_USD).toFixed(3)}\`)\n` +
+        `👥 *Filleuls actifs :* \`${referralsCount}\` (\`+$${referralEarnings.toFixed(3)}\`)\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `_Rémunération standard : $${TASK_REWARD_USD.toFixed(2)} par compte Facebook validé._`;
       buttons = [
         [
-          { text: '📋 Effectuer une Tâche', action: 'CHOOSE_FACEBOOK', variant: 'primary' },
-          { text: '🏦 Demander un Retrait', action: 'MENU_WITHDRAW', variant: 'secondary' }
+          { text: t.btn_tasks, action: 'CHOOSE_FACEBOOK', variant: 'primary' },
+          { text: t.btn_withdraw, action: 'MENU_WITHDRAW', variant: 'secondary' }
         ]
       ];
       break;
 
     case 'MENU_WITHDRAW':
       session.step = 'WITHDRAW';
-      responseMessage = `🏦 *Demande de Retrait de Gains*\n\n` +
-        `💵 Solde disponible : *0.00 €*\n` +
-        `🎯 Seuil minimum de retrait : *10.00 €*\n` +
-        `🛡️ Statut : 🟡 *En attente du seuil (10.00 €)*\n\n` +
+      const isEligible = balance >= MIN_WITHDRAWAL_USD;
+      responseMessage = `${t.withdrawal_title}\n\n` +
+        `💵 Solde disponible : *${balance.toFixed(3)} $* USD\n` +
+        `🎯 Seuil minimum de retrait : *${MIN_WITHDRAWAL_USD.toFixed(2)} $* USD\n` +
+        `🛡️ Statut : ${isEligible ? '🟢 *Éligible au retrait immédiat*' : '🟡 *En attente du seuil ($' + MIN_WITHDRAWAL_USD.toFixed(2) + ')*'}\n\n` +
         `Moyens de paiement pris en charge :\n` +
-        `• 📱 *Mobile Money* (MVola, Orange Money, Airtel Money)\n` +
         `• 🪙 *Crypto USDT* (TRC20 / BEP20 - 0 frais)\n` +
+        `• 📱 *Mobile Money* (MVola, Orange Money, Airtel Money)\n` +
         `• 💳 *Virement Bancaire SEPA*\n\n` +
         `_Sélectionnez votre moyen de retrait ci-dessous :_`;
       buttons = [
         [
-          { text: '📱 Mobile Money', action: 'WITHDRAW_MOBILE', variant: 'secondary' },
           { text: '🪙 Crypto (USDT)', action: 'WITHDRAW_CRYPTO', variant: 'secondary' },
+          { text: '📱 Mobile Money', action: 'WITHDRAW_MOBILE', variant: 'secondary' },
           { text: '💳 Virement Bancaire', action: 'WITHDRAW_BANK', variant: 'secondary' }
         ]
       ];
@@ -1010,7 +1401,7 @@ app.post('/api/bot/simulate-step', (req, res) => {
 
     case 'WITHDRAW_MOBILE':
       responseMessage = `📱 *Retrait Mobile Money (MVola, Orange Money, Airtel Money)*\n\n` +
-        `Montant minimum requis : *10.00 €*\n\n` +
+        `Montant minimum requis : *$${MIN_WITHDRAWAL_USD.toFixed(2)} USD*\n\n` +
         `Pour soumettre votre demande, transmettez votre numéro de téléphone et opérateur au support officiel : @TaskifySupport`;
       buttons = [
         [
@@ -1022,8 +1413,8 @@ app.post('/api/bot/simulate-step', (req, res) => {
 
     case 'WITHDRAW_CRYPTO':
       responseMessage = `🪙 *Retrait Crypto USDT (TRC-20 / BEP-20)*\n\n` +
-        `Frais réseau : *0 € (Offerts)*\n` +
-        `Seuil minimum : *10.00 €*\n\n` +
+        `Frais réseau : *$0.00 (Offerts)*\n` +
+        `Seuil minimum : *$${MIN_WITHDRAWAL_USD.toFixed(2)} USD*\n\n` +
         `Veuillez transmettre votre adresse de portefeuille USDT au gestionnaire : @TaskifySupport`;
       buttons = [
         [
@@ -1034,7 +1425,7 @@ app.post('/api/bot/simulate-step', (req, res) => {
       break;
 
     case 'WITHDRAW_BANK':
-      responseMessage = `💳 *Virement Bancaire (SEPA)*\n\n` +
+      responseMessage = `💳 *Virement Bancaire (SEPA / International)*\n\n` +
         `Délai moyen de traitement : 24h à 48h ouvrées.\n` +
         `Transmettez votre RIB / IBAN au support : @TaskifySupport`;
       buttons = [
@@ -1047,7 +1438,7 @@ app.post('/api/bot/simulate-step', (req, res) => {
 
     case 'MENU_SUPPORT':
       session.step = 'SUPPORT';
-      responseMessage = `📞 *Support & Assistance Opérateurs*\n\n` +
+      responseMessage = `${t.support_title}\n\n` +
         `Une question technique, un blocage ou une demande de paiement ?\n\n` +
         `👤 *Administrateur Support :* @TaskifySupport\n` +
         `📢 *Canal Officiel :* @TaskifyAnnouncements\n` +
@@ -1057,7 +1448,7 @@ app.post('/api/bot/simulate-step', (req, res) => {
       buttons = [
         [
           { text: '❓ FAQ & Questions Fréquentes', action: 'ACTION_FAQ', variant: 'secondary' },
-          { text: '🚀 Démarrer une Tâche', action: 'CHOOSE_FACEBOOK', variant: 'primary' }
+          { text: t.btn_tasks, action: 'CHOOSE_FACEBOOK', variant: 'primary' }
         ]
       ];
       break;
@@ -1065,40 +1456,43 @@ app.post('/api/bot/simulate-step', (req, res) => {
     case 'ACTION_FAQ':
       responseMessage = `❓ *FAQ & Questions Fréquentes*\n\n` +
         `• *Validation des comptes :* Instantanée dès réception de l'UID et des cookies complets.\n` +
-        `• *Paiements :* Retrait débloqué dès 10.00 € via Mobile Money ou USDT.\n` +
-        `• *Parrainage :* +0.25 € reversé à chaque tâche complétée par vos filleuls.\n` +
+        `• *Rémunération :* $${TASK_REWARD_USD.toFixed(2)} USD par compte validé.\n` +
+        `• *Paiements :* Retrait débloqué dès $${MIN_WITHDRAWAL_USD.toFixed(2)} USD sans frais.\n` +
+        `• *Parrainage :* +$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)} à l'inscription + ${REFERRAL_COMMISSION_PERCENT}% ($${REFERRAL_TASK_COMMISSION_USD.toFixed(3)}) récurrent.\n` +
         `• *Contact direct :* @TaskifySupport`;
       buttons = [
-        [{ text: '🚀 Démarrer une Tâche', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]
+        [{ text: t.btn_tasks, action: 'CHOOSE_FACEBOOK', variant: 'primary' }]
       ];
       break;
 
     case 'MENU_REFERRAL':
       session.step = 'REFERRAL';
-      responseMessage = `👥 *Programme de Parrainage ${botSettings.platformName}*\n\n` +
+      responseMessage = `${t.referral_title}\n\n` +
         `Invitez d'autres opérateurs et gagnez des commissions automatiques !\n\n` +
-        `💎 *Gains par tâche validée par un filleul :* \`+0.25 €\`\n` +
-        `📊 *Nombre de filleuls actifs :* \`0\`\n` +
-        `💵 *Total des commissions perçues :* \`0.00 €\`\n\n` +
+        `🎁 *Bonus direct par inscription :* \`+$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\`\n` +
+        `💎 *Gains par tâche filleul :* \`${REFERRAL_COMMISSION_PERCENT}%\` (\`+$${REFERRAL_TASK_COMMISSION_USD.toFixed(3)}\` / tâche)\n` +
+        `📊 *Nombre de filleuls actifs :* \`${referralsCount}\`\n` +
+        `💵 *Total des commissions perçues :* \`$${referralEarnings.toFixed(3)}\`\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
         `🔗 *Votre lien de parrainage unique :*\n` +
         `\`https://t.me/TaskifyProBot?start=ref_sim_${sessionId}\`\n\n` +
-        `_Partagez ce lien à vos connaissances pour commencer à accumuler des revenus passifs._`;
+        `_Partagez ce lien pour accumuler des revenus passifs récurrents._`;
       buttons = [
-        [{ text: '🚀 Faire des tâches', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]
+        [{ text: t.btn_tasks, action: 'CHOOSE_FACEBOOK', variant: 'primary' }]
       ];
       break;
 
     case 'MENU_LEADERBOARD':
       session.step = 'LEADERBOARD';
-      responseMessage = `🏆 *Classement des Meilleurs Opérateurs (Ce Mois)*\n\n` +
-        `1. 🥇 Opérateur #9482 — \`428 tâches\` (Prime +50.00 €)\n` +
-        `2. 🥈 Opérateur #1092 — \`391 tâches\` (Prime +30.00 €)\n` +
-        `3. 🥉 Opérateur #7401 — \`315 tâches\` (Prime +15.00 €)\n` +
+      responseMessage = `${t.leaderboard_title}\n\n` +
+        `1. 🥇 Opérateur #9482 — \`428 tâches\` (Prime +$50.00)\n` +
+        `2. 🥈 Opérateur #1092 — \`391 tâches\` (Prime +$30.00)\n` +
+        `3. 🥉 Opérateur #7401 — \`315 tâches\` (Prime +$15.00)\n` +
         `4. ⭐ Opérateur #5892 — \`280 tâches\`\n` +
         `5. ⭐ Opérateur #3419 — \`204 tâches\`\n\n` +
         `━━━━━━━━━━━━━━━━━━\n` +
-        `📍 *Votre Position :* \`Top 15%\`\n` +
-        `📊 *Vos Tâches :* \`0 validées\` (\`0.00 €\` gagnés)\n\n` +
+        `📍 *Votre Position :* \`${tasksCompleted > 0 ? 'Top 15%' : 'Non classé'}\`\n` +
+        `📊 *Vos Tâches :* \`${tasksCompleted} validées\` (\`$${(tasksCompleted * TASK_REWARD_USD).toFixed(3)}\` gagnés)\n\n` +
         `_Primes versées automatiquement chaque 1er du mois aux 3 premiers du classement._`;
       buttons = [
         [{ text: '🚀 Faire des tâches pour grimper', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]
@@ -1107,47 +1501,73 @@ app.post('/api/bot/simulate-step', (req, res) => {
 
     case 'MENU_LANGUAGE':
       session.step = 'LANGUAGE';
-      responseMessage = `🪩 *Sélection de la Langue / Language / Fiteny*\n\n` +
-        `Langue actuelle : 🇫🇷 *Français*\n\n` +
+      const langNamesDisplay: Record<string, string> = {
+        fr: '🇫🇷 Français',
+        en: '🇬🇧 English',
+        ru: '🇷🇺 Русский',
+        es: '🇪🇸 Español',
+        id: '🇮🇩 Bahasa Indonesia'
+      };
+      responseMessage = `🪩 *Sélection de la Langue / Language Selection / Выбор языка*\n\n` +
+        `Langue actuelle : *${langNamesDisplay[currentLang] || '🇫🇷 Français'}*\n\n` +
         `Choisissez votre langue de préférence ci-dessous :`;
       buttons = [
         [
-          { text: '🇫🇷 Français', action: 'SET_LANG_FR', variant: 'primary' },
-          { text: '🇲🇬 Malagasy', action: 'SET_LANG_MG', variant: 'secondary' },
-          { text: '🇬🇧 English', action: 'SET_LANG_EN', variant: 'secondary' }
+          { text: '🇫🇷 Français', action: 'SET_LANG_FR', variant: currentLang === 'fr' ? 'primary' : 'secondary' },
+          { text: '🇬🇧 English', action: 'SET_LANG_EN', variant: currentLang === 'en' ? 'primary' : 'secondary' }
+        ],
+        [
+          { text: '🇷🇺 Русский', action: 'SET_LANG_RU', variant: currentLang === 'ru' ? 'primary' : 'secondary' },
+          { text: '🇪🇸 Español', action: 'SET_LANG_ES', variant: currentLang === 'es' ? 'primary' : 'secondary' }
+        ],
+        [
+          { text: '🇮🇩 Bahasa Indonesia', action: 'SET_LANG_ID', variant: currentLang === 'id' ? 'primary' : 'secondary' }
         ]
       ];
       break;
 
     case 'SET_LANG_FR':
-      responseMessage = `✅ La langue du bot reste configurée en **Français**.`;
+      session.language = 'fr';
+      responseMessage = TRANSLATIONS.fr.lang_confirm;
       buttons = [[{ text: '📋 Voir les Tâches', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]];
       break;
 
-    case 'SET_LANG_MG':
-      responseMessage = `✅ Voafaritra amin'ny teny **Malagasy** ny bot.`;
-      buttons = [[{ text: '📋 Hanao Asa (Tâches)', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]];
-      break;
-
     case 'SET_LANG_EN':
-      responseMessage = `🌐 Language updated to **English**.`;
+      session.language = 'en';
+      responseMessage = TRANSLATIONS.en.lang_confirm;
       buttons = [[{ text: '📋 View Tasks', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]];
       break;
 
+    case 'SET_LANG_RU':
+      session.language = 'ru';
+      responseMessage = TRANSLATIONS.ru.lang_confirm;
+      buttons = [[{ text: '📋 Выполнить задание', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]];
+      break;
+
+    case 'SET_LANG_ES':
+      session.language = 'es';
+      responseMessage = TRANSLATIONS.es.lang_confirm;
+      buttons = [[{ text: '📋 Realizar una Tarea', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]];
+      break;
+
+    case 'SET_LANG_ID':
+      session.language = 'id';
+      responseMessage = TRANSLATIONS.id.lang_confirm;
+      buttons = [[{ text: '📋 Kerjakan Tugas', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]];
+      break;
+
     case 'ACTION_TASK_RULES':
-      responseMessage = `📋 *Consignes & Règles de Création Facebook*\n\n` +
-        `1. Créez un compte Facebook avec le Prénom, Nom et Mot de passe fournis.\n` +
-        `2. Récupérez l'identifiant UID unique du profil créé.\n` +
-        `3. Exportez les cookies complets au format standard (c_user, datr, xs...).\n` +
-        `4. Transmettez les éléments au bot pour validation immédiate.\n\n` +
-        `_Rémunération : 1.50 € par compte validé._`;
+      responseMessage = t.task_rules_text;
       buttons = [
         [{ text: '🚀 Démarrer la tâche maintenant', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]
       ];
       break;
 
     case 'HELP':
-      responseMessage = `📌 *Taskify Pro (@TaskifyProBot) - Aide*\n\nCe système automatise l'enregistrement de vos tâches et la transmission des UID / Cookies vers Google Sheets.\n\nCliquez ci-dessous pour démarrer :`;
+      responseMessage = `📌 *${botSettings.platformName} (@TaskifyProBot) - Guide*\n\n` +
+        `Ce système automatise l'enregistrement de vos tâches et la transmission des UID / Cookies vers Google Sheets.\n\n` +
+        `💵 Rémunération : *$${TASK_REWARD_USD.toFixed(2)} USD* par compte validé.\n\n` +
+        `Cliquez ci-dessous pour démarrer :`;
       buttons = [
         [{ text: '🌐 Démarrer tâche Facebook', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]
       ];
@@ -1156,22 +1576,22 @@ app.post('/api/bot/simulate-step', (req, res) => {
     case 'CHOOSE_FACEBOOK':
       session.step = 'AUTH_CHOICE';
       session.taskType = 'Facebook';
-      responseMessage = `🌐 *Tâche : Création de Compte Facebook*\n\n` +
-        `💵 Rémunération par compte validé : *1.50 €*\n\n` +
+      responseMessage = `${t.tasks_title}\n\n` +
+        `💵 Rémunération par compte validé : *$${TASK_REWARD_USD.toFixed(2)} USD*\n\n` +
         `Choisissez votre méthode d'authentification pour cette tâche :\n\n` +
         `• 🍪 *Cookies* : Recommandé pour validation et enregistrement immédiat.\n` +
         `• 🔐 *2FA* : Authentification par clé sécurisée.\n\n` +
         `_Sélectionnez votre option ci-dessous :_`;
       buttons = [
         [
-          { text: '🍪 Cookies (Recommandé)', action: 'CHOOSE_COOKIES', variant: 'primary' },
-          { text: '🔐 2FA', action: 'CHOOSE_2FA', variant: 'secondary' }
+          { text: t.btn_cookies, action: 'CHOOSE_COOKIES', variant: 'primary' },
+          { text: t.btn_2fa, action: 'CHOOSE_2FA', variant: 'secondary' }
         ],
         [
-          { text: 'ℹ️ Consignes & Règles', action: 'ACTION_TASK_RULES', variant: 'secondary' }
+          { text: t.btn_rules, action: 'ACTION_TASK_RULES', variant: 'secondary' }
         ],
         [
-          { text: '❌ Annuler le processus', action: 'CANCEL', variant: 'danger' }
+          { text: t.btn_cancel, action: 'CANCEL', variant: 'danger' }
         ]
       ];
       break;
@@ -1198,22 +1618,23 @@ app.post('/api/bot/simulate-step', (req, res) => {
       responseMessage = `⚠️ *Informations du compte Facebook*\n\n` +
         `✅ Prénom : \`${name.firstName}\`\n` +
         `✅ Nom : \`${name.lastName}\`\n` +
-        `🇫🇷 Mot de passe : \`${botSettings.customPassword}\`\n\n` +
+        `🔑 Mot de passe : \`${botSettings.customPassword}\`\n` +
+        `💵 Gain : \`$${TASK_REWARD_USD.toFixed(2)} USD\`\n\n` +
         `🔻 Une fois le compte créé, envoyez votre UID.`;
       
       buttons = [
-        [{ text: '📥 Envoyer l\'UID', action: 'PROMPT_UID', variant: 'primary' }],
+        [{ text: t.btn_send_uid, action: 'PROMPT_UID', variant: 'primary' }],
         [{ text: '🔙 Retour', action: 'CHOOSE_FACEBOOK', variant: 'secondary' }],
-        [{ text: '❌ Annuler le processus', action: 'CANCEL', variant: 'danger' }]
+        [{ text: t.btn_cancel, action: 'CANCEL', variant: 'danger' }]
       ];
       addLog('info', 'simulator', `Simulateur: Identité générée (${name.firstName} ${name.lastName})`);
       break;
 
     case 'PROMPT_UID':
       session.step = 'AWAITING_UID';
-      responseMessage = `✍️ *Étape 1/2 : Envoi de l'UID*\n\nVeuillez saisir ou coller votre *UID Facebook* dans le champ texte ci-dessous (ex: \`100084928172910\`) :`;
+      responseMessage = t.awaiting_uid;
       buttons = [
-        [{ text: '❌ Annuler le processus', action: 'CANCEL', variant: 'danger' }]
+        [{ text: t.btn_cancel, action: 'CANCEL', variant: 'danger' }]
       ];
       break;
 
@@ -1224,11 +1645,9 @@ app.post('/api/bot/simulate-step', (req, res) => {
       } else {
         session.uid = input.trim();
         session.step = 'AWAITING_COOKIES';
-        responseMessage = `✅ *UID reçu avec succès :* \`${session.uid}\`\n\n` +
-          `🍪 *Étape 2/2 : Envoi des Cookies*\n\n` +
-          `Veuillez maintenant coller vos *Cookies Facebook* (ex: \`datr=...; c_user=...; xs=...\`) :`;
+        responseMessage = `✅ *UID reçu avec succès :* \`${session.uid}\`\n\n` + t.awaiting_cookies;
         buttons = [
-          [{ text: '❌ Annuler le processus', action: 'CANCEL', variant: 'danger' }]
+          [{ text: t.btn_cancel, action: 'CANCEL', variant: 'danger' }]
         ];
       }
       break;
@@ -1245,8 +1664,8 @@ app.post('/api/bot/simulate-step', (req, res) => {
           id: `task-${Date.now()}`,
           uid: session.uid || '1000' + Math.floor(Math.random() * 90000000000),
           cookies: session.cookies,
-          firstName: session.firstName || 'Généré',
-          lastName: session.lastName || 'Auto',
+          firstName: session.firstName || 'Alexandre',
+          lastName: session.lastName || 'Dubois',
           password: session.password || botSettings.customPassword,
           telegramUserId: 'sim_' + sessionId,
           telegramUsername: 'simulateur_user',
@@ -1268,27 +1687,34 @@ app.post('/api/bot/simulate-step', (req, res) => {
           });
         }
 
-        // Clean session
-        delete userSessions[sessionId];
+        // Update Session Ledger
+        session.balance = (session.balance || 0) + TASK_REWARD_USD;
+        session.tasksCompleted = (session.tasksCompleted || 0) + 1;
+        const newBal = session.balance;
+
+        delete session.step;
 
         responseMessage = `🎉 *Tâche terminée avec succès !*\n\n` +
-          `✅ Vos informations ont été enregistrées avec succès dans le tableau de bord et synchronisées.\n\n` +
+          `✅ Vos informations ont été enregistrées avec succès et synchronisées.\n` +
+          `💵 *+$${TASK_REWARD_USD.toFixed(2)} USD* crédités sur votre solde disponible !\n\n` +
           `🆔 *UID :* \`${createdTask.uid}\`\n` +
           `👤 *Nom complet :* ${createdTask.firstName} ${createdTask.lastName}\n` +
+          `💰 *Nouveau solde :* \`$${newBal.toFixed(3)} USD\`\n` +
           `📅 *Date :* ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}\n\n` +
           `Merci pour votre travail !`;
 
         buttons = [
-          [{ text: '🚀 Nouvelle Tâche Facebook', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]
+          [{ text: '🚀 ' + t.btn_tasks, action: 'CHOOSE_FACEBOOK', variant: 'primary' }],
+          [{ text: '💰 ' + t.btn_withdraw, action: 'MENU_WITHDRAW', variant: 'secondary' }]
         ];
       }
       break;
 
     case 'CANCEL':
-      delete userSessions[sessionId];
-      responseMessage = `❌ *Processus annulé.*\n\nAucune donnée n'a été enregistrée. Cliquez ci-dessous pour recommencer :`;
+      delete userSessions[sessionId].step;
+      responseMessage = t.cancelled + `\n\nCliquez ci-dessous pour recommencer :`;
       buttons = [
-        [{ text: '🚀 Démarrer une nouvelle tâche', action: 'CHOOSE_FACEBOOK', variant: 'primary' }]
+        [{ text: '🚀 ' + t.btn_tasks, action: 'CHOOSE_FACEBOOK', variant: 'primary' }]
       ];
       addLog('info', 'simulator', `Simulateur: Processus annulé par l'utilisateur.`);
       break;
@@ -1298,13 +1724,13 @@ app.post('/api/bot/simulate-step', (req, res) => {
       if (!session || !session.step || session.step === 'START') {
         responseMessage = `👋 Bonjour ! Utilisez le menu principal ci-dessous ou cliquez sur [ 📋 Tâches ] pour commencer :`;
         buttons = [
-          [{ text: '🚀 Démarrer une Tâche Facebook', action: 'CHOOSE_FACEBOOK', variant: 'primary' }],
-          [{ text: '💰 Voir mon Solde', action: 'MENU_BALANCE', variant: 'secondary' }]
+          [{ text: '🚀 ' + t.btn_tasks, action: 'CHOOSE_FACEBOOK', variant: 'primary' }],
+          [{ text: '💰 ' + t.balance_title.split('*')[1] || 'Solde', action: 'MENU_BALANCE', variant: 'secondary' }]
         ];
       } else {
         responseMessage = `Action prise en compte. Utilisez les boutons interactifs ci-dessous pour naviguer.`;
         buttons = [
-          [{ text: '📋 Tâches Disponibles', action: 'CHOOSE_FACEBOOK', variant: 'primary' }],
+          [{ text: t.btn_tasks, action: 'CHOOSE_FACEBOOK', variant: 'primary' }],
           [{ text: '💰 Mon Solde', action: 'MENU_BALANCE', variant: 'secondary' }]
         ];
       }
@@ -1333,30 +1759,39 @@ app.post('/api/test-google-sheets', async (req, res) => {
       action: 'ping_test',
       timestamp: new Date().toISOString(),
       platform: botSettings.platformName,
-      message: 'Test de connexion réussi depuis Task By RFC Office',
+      message: 'Test de connexion réussi depuis Taskify Pro',
       uid: 'TEST_UID_999999',
-      cookies: 'datr=test_cookie_sample; c_user=TEST_UID_999999',
-      firstName: 'Jean',
-      lastName: 'Dupont',
+      cookies: 'datr=test_cookie_sample; c_user=TEST_UID_999999; xs=test_token_123',
+      firstName: 'Alexandre',
+      lastName: 'Dubois',
       password: botSettings.customPassword,
       telegramUserId: 'test_admin',
-      telegramUsername: 'admin_rfc',
+      telegramUsername: 'admin_taskify',
       status: 'compte créé',
-      notes: 'Ligne de test générée par le tableau de bord'
+      notes: 'Ligne de test générée par le tableau de bord',
+      rewardUSD: TASK_REWARD_USD
     };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(testPayload)
+      body: JSON.stringify(testPayload),
+      signal: controller.signal,
+      redirect: 'follow'
     });
+
+    clearTimeout(timeoutId);
 
     const responseText = await response.text();
     addLog('success', 'sheets', `Ping Google Sheets réussi vers ${targetUrl}`);
     res.json({ success: true, response: responseText });
   } catch (error: any) {
-    addLog('error', 'sheets', `Erreur de test Google Sheets: ${error.message}`);
-    res.status(500).json({ success: false, error: error.message });
+    const errorMsg = error.name === 'AbortError' ? 'Délai d\'attente dépassé (Timeout 15s)' : error.message;
+    addLog('error', 'sheets', `Erreur de test Google Sheets: ${errorMsg}`);
+    res.status(500).json({ success: false, error: errorMsg });
   }
 });
 
@@ -1449,223 +1884,13 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
 // 13. Exportable Files Endpoint
 app.get('/api/export-files', (req, res) => {
-  const standaloneBotJs = `/**
- * Taskify Pro - Standalone Telegram Bot (@TaskifyProBot)
- * 100% FREE Hosting on Render / Railway / Vercel / VPS
- * Requirements: npm install telegraf dotenv
- */
-
-require('dotenv').config();
-const { Telegraf, Markup } = require('telegraf');
-
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const GOOGLE_SHEETS_WEBHOOK_URL = process.env.GOOGLE_SHEET_WEBHOOK_URL;
-let CUSTOM_PASSWORD = process.env.DEFAULT_BOT_PASSWORD || "TaskPassword@2025!";
-
-if (!BOT_TOKEN) {
-  console.error("❌ ERREUR: TELEGRAM_BOT_TOKEN manquant dans le fichier .env");
-  process.exit(1);
-}
-
-const bot = new Telegraf(BOT_TOKEN);
-
-// French Names Generator
-const FIRST_NAMES = ['Alexandre', 'Thomas', 'Julien', 'Nicolas', 'Maxime', 'Lucas', 'Antoine', 'Romain', 'Camille', 'Emma', 'Léa', 'Chloé', 'Sarah'];
-const LAST_NAMES = ['Martin', 'Bernard', 'Dubois', 'Thomas', 'Robert', 'Richard', 'Petit', 'Durand', 'Leroy', 'Moreau', 'Laurent', 'Dupont'];
-
-function getRandomName() {
-  const first = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
-  const last = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
-  return { first, last };
-}
-
-// User session storage
-const sessions = {};
-
-// Google Sheets Sync function
-async function saveToGoogleSheets(data) {
-  if (!GOOGLE_SHEETS_WEBHOOK_URL) return;
+  const fs = require('fs');
+  let currentBotJs = '';
   try {
-    const response = await fetch(GOOGLE_SHEETS_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    console.log("✅ Données sauvegardées dans Google Sheets:", data.uid);
-  } catch (err) {
-    console.error("❌ Erreur Google Sheets:", err.message);
+    currentBotJs = fs.readFileSync(path.join(process.cwd(), 'bot.js'), 'utf8');
+  } catch (e) {
+    currentBotJs = '// bot.js';
   }
-}
-
-// /start command
-bot.start(async (ctx) => {
-  const userId = String(ctx.from.id);
-  sessions[userId] = { step: 'START' };
-
-  await ctx.reply(
-    "👋 *Bienvenue sur Taskify Pro (@TaskifyProBot) !*\\n\\nVeuillez choisir une tâche à exécuter :",
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🌐 Facebook', 'task_facebook')],
-        [Markup.button.callback('ℹ️ Aide', 'task_help')]
-      ])
-    }
-  );
-});
-
-bot.action('task_help', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.reply("📌 *Taskify Pro (@TaskifyProBot)*\\nAutomatisation de création de comptes et synchronisation Google Sheets.\\nTapez /start pour commencer.", { parse_mode: 'Markdown' });
-});
-
-bot.action('task_facebook', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = String(ctx.from.id);
-  sessions[userId] = { step: 'AUTH_CHOICE', taskType: 'Facebook' };
-
-  await ctx.reply(
-    "🌐 *Tâche : Facebook*\\n\\nChoisissez votre méthode d'authentification :",
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🍪 Cookies', 'auth_cookies')],
-        [Markup.button.callback('🔐 2FA', 'auth_2fa')],
-        [Markup.button.callback('❌ Annuler', 'action_cancel')]
-      ])
-    }
-  );
-});
-
-bot.action('auth_2fa', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = String(ctx.from.id);
-  delete sessions[userId];
-
-  await ctx.reply(
-    "⚠️ *Authentification 2FA non supportée*\\nVeuillez utiliser l'option *Cookies* pour cette tâche.",
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🔄 Recommencer', 'task_facebook')]
-      ])
-    }
-  );
-});
-
-bot.action('auth_cookies', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = String(ctx.from.id);
-  const { first, last } = getRandomName();
-
-  sessions[userId] = {
-    step: 'CREDENTIALS_SHOWN',
-    firstName: first,
-    lastName: last,
-    password: CUSTOM_PASSWORD
-  };
-
-  await ctx.reply(
-    \`📋 *Informations générées pour votre compte :*\\n\\n\` +
-    \`👤 *Prénom :* \\\`\${first}\\\`\\n\` +
-    \`👤 *Nom :* \\\`\${last}\\\`\\n\` +
-    \`🔑 *Mot de passe :* \\\`\${CUSTOM_PASSWORD}\\\`\\n\\n\` +
-    \`Cliquez sur le bouton ci-dessous pour transmettre votre UID Facebook :\`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('📤 Envoie UID', 'action_send_uid')],
-        [Markup.button.callback('❌ Annulation processus', 'action_cancel')]
-      ])
-    }
-  );
-});
-
-bot.action('action_send_uid', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = String(ctx.from.id);
-  if (!sessions[userId]) sessions[userId] = {};
-  sessions[userId].step = 'AWAITING_UID';
-
-  await ctx.reply("✍️ *Étape 1/2 :* Veuillez envoyer votre **UID Facebook** :", {
-    parse_mode: 'Markdown',
-    ...Markup.inlineKeyboard([[Markup.button.callback('❌ Annuler', 'action_cancel')]])
-  });
-});
-
-bot.action('action_cancel', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = String(ctx.from.id);
-  delete sessions[userId];
-  await ctx.reply("❌ Processus annulé. Tapez /start pour recommencer.");
-});
-
-bot.on('text', async (ctx) => {
-  const userId = String(ctx.from.id);
-  const username = ctx.from.username || ctx.from.first_name || 'utilisateur';
-  const text = ctx.message.text.trim();
-  const session = sessions[userId];
-
-  if (!session) return;
-
-  if (session.step === 'AWAITING_UID') {
-    session.uid = text;
-    session.step = 'AWAITING_COOKIES';
-
-    await ctx.reply(
-      \`✅ *UID enregistré :* \\\`\${text}\\\`\\n\\n🍪 *Étape 2/2 :* Veuillez maintenant envoyer vos **Cookies Facebook** :\`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([[Markup.button.callback('❌ Annuler', 'action_cancel')]])
-      }
-    );
-    return;
-  }
-
-  if (session.step === 'AWAITING_COOKIES') {
-    session.cookies = text;
-
-    const record = {
-      action: 'insert_task',
-      id: 'task-' + Date.now(),
-      timestamp: new Date().toISOString(),
-      uid: session.uid,
-      cookies: session.cookies,
-      firstName: session.firstName || 'Généré',
-      lastName: session.lastName || 'Auto',
-      password: session.password || CUSTOM_PASSWORD,
-      telegramUserId: userId,
-      telegramUsername: username,
-      status: 'compte créé',
-      notes: 'Soumis via Telegram Bot Taskify Pro'
-    };
-
-    // Save to Google Sheets
-    await saveToGoogleSheets(record);
-    delete sessions[userId];
-
-    await ctx.reply(
-      \`🎉 *Tâche terminée avec succès !*\\n\\n\` +
-      \`✅ Vos identifiants et cookies ont été validés et enregistrés.\\n\` +
-      \`🆔 UID : \\\`\${record.uid}\\\`\\n\` +
-      \`👤 Nom : \${record.firstName} \${record.lastName}\\n\\n\` +
-      \`Merci !\`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([[Markup.button.callback('🚀 Nouvelle Tâche', 'task_facebook')]])
-      }
-    );
-  }
-});
-
-bot.launch().then(() => {
-  console.log('🤖 Bot Telegram Taskify Pro (@TaskifyProBot) opérationnel !');
-});
-
-// Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
-`;
 
   const standaloneGoogleAppsScript = `/**
  * =========================================================================
@@ -1706,10 +1931,11 @@ function doPost(e) {
         "Cookies",
         "ID Telegram",
         "Username Telegram",
+        "Rémunération ($)",
         "Notes"
       ]);
       // Met en forme l'en-tête (Gras + Fond bleu foncé)
-      var headerRange = sheet.getRange(1, 1, 1, 11);
+      var headerRange = sheet.getRange(1, 1, 1, 12);
       headerRange.setFontWeight("bold");
       headerRange.setBackground("#1e293b");
       headerRange.setFontColor("#ffffff");
@@ -1732,6 +1958,7 @@ function doPost(e) {
       data.cookies || "",
       "'" + (data.telegramUserId || ""),
       "@" + (data.telegramUsername || "").replace("@", ""),
+      data.rewardUSD || 0.04,
       data.notes || ""
     ];
 
@@ -1760,13 +1987,18 @@ function doGet(e) {
     status: "online",
     platform: "Taskify Pro",
     bot: "@TaskifyProBot",
+    financials: {
+      taskRewardUSD: 0.04,
+      referralSignupBonusUSD: 0.01,
+      referralCommissionPercent: 20
+    },
     message: "Google Apps Script Webhook API est fonctionnel !"
   })).setMimeType(ContentService.MimeType.JSON);
 }
 `;
 
   res.json({
-    botJs: standaloneBotJs,
+    botJs: currentBotJs,
     googleAppsScript: standaloneGoogleAppsScript,
     envExample: `TELEGRAM_BOT_TOKEN="votre_token_botfather_ici"\nGOOGLE_SHEET_WEBHOOK_URL="https://script.google.com/macros/s/.../exec"\nDEFAULT_BOT_PASSWORD="TaskPassword@2025!"\nPORT=3000`,
     packageJson: `{\n  "name": "taskify-pro-bot",\n  "version": "1.0.0",\n  "main": "bot.js",\n  "scripts": {\n    "start": "node bot.js"\n  },\n  "dependencies": {\n    "dotenv": "^16.4.5",\n    "telegraf": "^4.16.3"\n  }\n}`
