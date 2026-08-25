@@ -660,7 +660,7 @@ export async function sendToGoogleSheetsWebhook(task: TaskRecord, webhookUrl: st
   };
 
   try {
-    // Attempt via backend proxy first
+    // Alefaso hatrany amin'ny alalan'ny backend proxy (izay efa ao amin'ny code-nao)
     const proxyRes = await safeFetchJson<{ success: boolean; error?: string }>('/api/test-google-sheets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -670,22 +670,13 @@ export async function sendToGoogleSheetsWebhook(task: TaskRecord, webhookUrl: st
     if (proxyRes && proxyRes.success) {
       addClientLog('success', 'sheets', `Synchronisé avec Google Sheets pour UID: ${task.uid}`);
       return { success: true, message: 'Synchronisé via serveur' };
+    } else {
+      throw new Error(proxyRes?.error || 'Erreur serveur proxy Google Sheets');
     }
 
-    // Direct fetch with no-cors support as standard Apps Script Web App
-    await fetch(webhookUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    addClientLog('success', 'sheets', `Données transmises au Webhook Google Sheets pour UID: ${task.uid}`);
-    return { success: true, message: 'Transmis au Webhook Google Sheets' };
   } catch (err: any) {
     addClientLog('error', 'sheets', `Erreur Webhook Google Sheets: ${err.message}`);
     return { success: false, error: err.message };
   }
 }
-
 
