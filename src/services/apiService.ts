@@ -643,36 +643,19 @@ export async function sendToGoogleSheetsWebhook(task: TaskRecord, webhookUrl: st
     return { success: false, error: 'URL Google Sheets non configurée' };
   }
 
-  // Mamadika ny task ho Query Parameters (GET)
-  const params = new URLSearchParams({
-    id: task.id || '',
-    uid: task.uid || '',
-    firstName: task.firstName || '',
-    lastName: task.lastName || '',
-    password: task.password || '',
-    cookies: task.cookies || '',
-    telegramUserId: String(task.telegramUserId || ''),
-    telegramUsername: task.telegramUsername || '',
-    status: task.status || 'compte créé',
-    notes: task.notes || ''
-  });
-
-  const fullUrl = `${webhookUrl}?${params.toString()}`;
-
   try {
-    // Mandefa GET mivantana any amin'ny Google Apps Script
-    const response = await fetch(fullUrl, {
-      method: 'GET',
-      redirect: 'follow'
+    // Mandefa azy mandalo amin'ny Server Node.js (Proxy) mba tsy ho voasakan'ny CORS
+    const proxyRes = await safeFetchJson<{ success: boolean; error?: string }>('/api/test-google-sheets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: webhookUrl, task: task })
     });
 
-    const responseText = await response.text();
-    
-    if (response.ok || response.status < 400) {
+    if (proxyRes && proxyRes.success) {
       addClientLog('success', 'sheets', `Synchronisé avec Google Sheets pour UID: ${task.uid}`);
-      return { success: true, message: 'Synchronisé avec succès' };
+      return { success: true, message: 'Synchronisé via serveur' };
     } else {
-      throw new Error(`Erreur HTTP ${response.status}`);
+      throw new Error(proxyRes?.error || 'Erreur serveur proxy');
     }
   } catch (err: any) {
     addClientLog('error', 'sheets', `Erreur Webhook Google Sheets: ${err.message}`);
