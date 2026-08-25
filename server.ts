@@ -63,6 +63,7 @@ let botSettings = {
   botToken: process.env.TELEGRAM_BOT_TOKEN || '',
   customPassword: process.env.DEFAULT_BOT_PASSWORD || 'TaskPassword@2025!',
   googleSheetWebhookUrl: process.env.GOOGLE_SHEET_WEBHOOK_URL || '',
+  googleSheetFields: DEFAULT_GOOGLE_SHEET_FIELDS.slice(),
   platformName: process.env.PLATFORM_NAME || 'Taskify Pro',
   isBotActive: false,
   mode: 'polling' as 'polling' | 'webhook',
@@ -106,7 +107,7 @@ const userSessions: Record<string, {
 
 // Helper: Dispatch task record to Google Apps Script Webhook
 async function syncRowToGoogleSheets(task: any) {
-  const webhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
+  const webhookUrl = botSettings.googleSheetWebhookUrl || process.env.GOOGLE_SHEET_WEBHOOK_URL ||'';
 
   if (!webhookUrl) {
     console.warn('GOOGLE_SHEET_WEBHOOK_URL not configured');
@@ -1213,9 +1214,10 @@ app.get('/api/settings', (req, res) => {
 });
 
 app.post('/api/settings', (req, res) => {
-  const { customPassword, googleSheetWebhookUrl, platformName, welcomeMessage, botToken } = req.body;
+  const {customPassword, googleSheetWebhookUrl, googleSheetFields, platformName, welcomeMessage, botToken} = req.body;
   if (customPassword !== undefined) botSettings.customPassword = customPassword;
   if (googleSheetWebhookUrl !== undefined) botSettings.googleSheetWebhookUrl = googleSheetWebhookUrl;
+  if (Array.isArray(googleSheetFields) && googleSheetFields.length > 0) {botSettings.googleSheetFields = googleSheetFields;}
   if (platformName !== undefined) botSettings.platformName = platformName;
   if (welcomeMessage !== undefined) botSettings.welcomeMessage = welcomeMessage;
   if (botToken !== undefined) botSettings.botToken = botToken;

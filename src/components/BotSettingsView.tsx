@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Save, 
   KeyRound, 
@@ -116,6 +116,12 @@ function doPost(e) {
       'telegramUsername'
     ]
   );
+
+  useEffect(() => {
+    if (Array.isArray(settings.googleSheetFields)) {
+      setGoogleSheetFields(settings.googleSheetFields);
+    }
+  }, [settings.googleSheetFields]);
 
   const toggleGoogleSheetField = (field: string) => {
     setGoogleSheetFields(prev => {
