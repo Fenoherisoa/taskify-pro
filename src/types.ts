@@ -17,10 +17,32 @@ export interface TaskRecord {
   taskType?: string;
 }
 
+export type GoogleSheetField =
+  | 'timestamp'
+  | 'id'
+  | 'status'
+  | 'uid'
+  | 'firstName'
+  | 'lastName'
+  | 'password'
+  | 'cookies'
+  | 'telegramUserId'
+  | 'telegramUsername'
+  | 'notes'
+  | 'taskType'
+  | 'rewardUSD';
+
+export interface GoogleSheetFieldConfig {
+  field: GoogleSheetField;
+  label: string;
+  enabled: boolean;
+}
+
 export interface BotSettings {
   botToken: string;
   customPassword: string;
   googleSheetWebhookUrl: string;
+  googleSheetFields?: GoogleSheetField[];
   platformName: string;
   isBotActive: boolean;
   mode: 'polling' | 'webhook';

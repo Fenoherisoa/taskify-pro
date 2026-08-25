@@ -18,7 +18,7 @@ import {
   Code2,
   Sparkles
 } from 'lucide-react';
-import { BotSettings } from '../types';
+import { BotSettings, GoogleSheetField } from '../types';
 
 interface BotSettingsViewProps {
   settings: BotSettings;
@@ -88,20 +88,91 @@ function doPost(e) {
     setTimeout(() => setCopiedCode(false), 2500);
   };
 
+  const GOOGLE_SHEET_FIELDS = [
+    { field: 'timestamp', label: 'Date & Heure' },
+    { field: 'id', label: 'ID Tâche' },
+    { field: 'status', label: 'Statut' },
+    { field: 'uid', label: 'UID Facebook' },
+    { field: 'firstName', label: 'Prénom' },
+    { field: 'lastName', label: 'Nom' },
+    { field: 'password', label: 'Mot de passe' },
+    { field: 'cookies', label: 'Cookies' },
+    { field: 'telegramUserId', label: 'ID Telegram' },
+    { field: 'telegramUsername', label: 'Username Telegram' },
+    { field: 'notes', label: 'Notes' },
+    { field: 'taskType', label: 'Type de tâche' },
+    { field: 'rewardUSD', label: 'Reward USD' }
+  ];
+
+  const [googleSheetFields, setGoogleSheetFields] = useState<string[]>(
+    settings.googleSheetFields || [
+      'timestamp',
+      'id',
+      'status',
+      'uid',
+      'firstName',
+      'lastName',
+      'telegramUserId',
+      'telegramUsername'
+    ]
+  );
+
+  const toggleGoogleSheetField = (field: string) => {
+    setGoogleSheetFields(prev => {
+      if (prev.includes(field)) {
+        return prev.filter(item => item !== field);
+      }
+
+      return [...prev, field];
+    });
+  };
+
+  const moveGoogleSheetField = (
+    index: number,
+    direction: 'up' | 'down'
+  ) => {
+    setGoogleSheetFields(prev => {
+      const next = [...prev];
+
+      const targetIndex =
+        direction === 'up'
+          ? index - 1
+          : index + 1;
+
+      if (
+        targetIndex < 0 ||
+        targetIndex >= next.length
+      ) {
+        return prev;
+      }
+
+      const temp = next[index];
+      next[index] = next[targetIndex];
+      next[targetIndex] = temp;
+
+      return next;
+    });
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
+
     try {
       await onSaveSettings({
         customPassword: customPassword.trim(),
         googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
         botToken: botToken.trim(),
-        platformName: platformName.trim()
+        platformName: platformName.trim(),
+        googleSheetFields: googleSheetFields
       });
+
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
+
     } catch (err) {
       console.error(err);
+
     } finally {
       setIsSaving(false);
     }
@@ -261,6 +332,98 @@ function doPost(e) {
                 {testStatus?.loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5 text-emerald-400" />}
                 <span>Tester la Connexion</span>
               </button>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold">
+                  Champs à envoyer vers Google Sheets
+                </h3>
+
+                <p className="text-sm text-muted-foreground">
+                  Les champs cochés seront envoyés dans l'ordre affiché.
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGoogleSheetFields(
+                      GOOGLE_SHEET_FIELDS.map(item => item.field)
+                    );
+                  }}
+                >
+                  Tout sélectionner
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGoogleSheetFields([]);
+                  }}
+                >
+                  Tout désélectionner
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {GOOGLE_SHEET_FIELDS.map(item => {
+                const index = googleSheetFields.indexOf(item.field);
+                const enabled = index !== -1;
+
+                return (
+                  <div
+                    key={item.field}
+                    className="flex items-center gap-3 rounded-lg border p-3"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={() =>
+                        toggleGoogleSheetField(item.field)
+                      }
+                    />
+
+                    <span className="w-8 text-sm font-medium">
+                      {enabled ? index + 1 : '—'}
+                    </span>
+
+                    <span className="flex-1">
+                      {item.label}
+                    </span>
+
+                    {enabled && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={() =>
+                            moveGoogleSheetField(index, 'up')
+                          }
+                        >
+                          ↑
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={
+                            index === googleSheetFields.length - 1
+                          }
+                          onClick={() =>
+                            moveGoogleSheetField(index, 'down')
+                          }
+                        >
+                          ↓
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 

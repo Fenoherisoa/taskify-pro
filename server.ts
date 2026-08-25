@@ -37,6 +37,22 @@ const LAST_NAMES = [
   'Faure', 'Rousseau', 'Blanc', 'Guerin', 'Muller', 'Henry', 'Roussel', 'Nicolas'
 ];
 
+const DEFAULT_GOOGLE_SHEET_FIELDS = [
+  'timestamp',
+  'id',
+  'status',
+  'uid',
+  'firstName',
+  'lastName',
+  'password',
+  'cookies',
+  'telegramUserId',
+  'telegramUsername',
+  'notes',
+  'taskType',
+  'rewardUSD'
+];
+
 function generateRandomName() {
   const firstName = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
   const lastName = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
@@ -89,65 +105,65 @@ const userSessions: Record<string, {
 }> = {};
 
 // Helper: Dispatch task record to Google Apps Script Webhook
-async function syncRowToGoogleSheets(task: any): Promise<{ success: boolean; message: string; statusCode?: number }> {
-  const webhookUrl = botSettings.googleSheetWebhookUrl || process.env.GOOGLE_SHEET_WEBHOOK_URL;
-  if (!webhookUrl || !webhookUrl.startsWith('http')) {
-    console.log(`[Google Sheets] ℹ️ Webhook URL non configurée. Enregistrement local uniquement (UID: ${task.uid})`);
-    return { success: false, message: 'Google Sheet Webhook URL not configured' };
+async function syncRowToGoogleSheets(task: any) {
+  const webhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
+
+  if (!webhookUrl) {
+    console.warn('GOOGLE_SHEET_WEBHOOK_URL not configured');
+    return;
   }
 
+  const selectedFields =
+    Array.isArray(botSettings.googleSheetFields) &&
+    botSettings.googleSheetFields.length > 0
+      ? botSettings.googleSheetFields
+      : DEFAULT_GOOGLE_SHEET_FIELDS;
+
+  const data = {
+    timestamp: task.createdAt || new Date().toISOString(),
+    id: task.id || '',
+    status: task.status || '',
+    uid: task.uid || '',
+    firstName: task.firstName || '',
+    lastName: task.lastName || '',
+    password: task.password || '',
+    cookies: task.cookies || '',
+    telegramUserId: task.telegramUserId || '',
+    telegramUsername: task.telegramUsername || '',
+    notes: task.notes || '',
+    taskType: task.taskType || '',
+    rewardUSD: task.rewardUSD ?? ''
+  };
+
+  const payload = {
+    action: 'insert_task',
+    selectedFields,
+    data
+  };
+
   try {
-    const payload = {
-      action: 'insert_task',
-      id: task.id || `task-${Date.now()}`,
-      timestamp: task.createdAt || task.timestamp || new Date().toISOString(),
-      uid: task.uid,
-      cookies: task.cookies,
-      firstName: task.firstName,
-      lastName: task.lastName,
-      password: task.password,
-      telegramUserId: String(task.telegramUserId),
-      telegramUsername: task.telegramUsername || 'utilisateur',
-      status: task.status || 'compte créé',
-      notes: task.notes || `Enregistré via ${botSettings.platformName || 'Taskify Pro'} (@TaskifyProBot)`,
-      taskType: task.taskType || 'Facebook',
-      rewardUSD: TASK_REWARD_USD
-    };
-
-    console.log(`[Google Sheets] 📡 Transmission des données vers Google Sheets Webhook (UID: ${task.uid})...`);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/plain, */*'
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-      redirect: 'follow'
+      body: JSON.stringify(payload)
     });
 
-    clearTimeout(timeoutId);
+    const text = await response.text();
 
-    const responseText = await response.text();
-    const isOk = response.ok || response.status < 400;
+    console.log('Google Sheets response:', text);
 
-    if (isOk) {
-      console.log(`[Google Sheets] ✅ Synchronisation réussie pour UID ${task.uid} (HTTP ${response.status}) -> ${responseText.slice(0, 150)}`);
-      addLog('success', 'sheets', `Données synchronisées avec Google Sheets pour UID: ${task.uid} (HTTP ${response.status})`);
-      return { success: true, message: responseText || 'OK', statusCode: response.status };
-    } else {
-      console.error(`[Google Sheets] ⚠️ Réponse non-200 du Webhook pour UID ${task.uid} (HTTP ${response.status}) -> ${responseText.slice(0, 200)}`);
-      addLog('warning', 'sheets', `Webhook Google Sheets a répondu HTTP ${response.status} pour UID: ${task.uid}`);
-      return { success: false, message: responseText || `HTTP ${response.status}`, statusCode: response.status };
+    if (!response.ok) {
+      throw new Error(
+        `Google Sheets HTTP ${response.status}: ${text}`
+      );
     }
-  } catch (error: any) {
-    const errorMsg = error.name === 'AbortError' ? 'Délai d\'attente dépassé (Timeout 15s)' : error.message;
-    console.error(`[Google Sheets] ❌ Échec synchronisation Google Sheets pour UID ${task.uid}:`, errorMsg);
-    addLog('error', 'sheets', `Échec synchronisation Google Sheets: ${errorMsg}`);
-    return { success: false, message: errorMsg };
+
+    return text;
+  } catch (error) {
+    console.error('Google Sheets sync failed:', error);
+    throw error;
   }
 }
 
