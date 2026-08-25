@@ -76,42 +76,64 @@ const userSessions: Record<string, {
 }> = {};
 
 // Helper: Dispatch task record to Google Apps Script Webhook
-async function syncRowToGoogleSheets(task: any): Promise<{ success: boolean; message: string }> {
-  if (!botSettings.googleSheetWebhookUrl || !botSettings.googleSheetWebhookUrl.startsWith('http')) {
+async function syncRowToGoogleSheets(task: any): Promise<{ success: boolean; message: string; statusCode?: number }> {
+  const webhookUrl = botSettings.googleSheetWebhookUrl || process.env.GOOGLE_SHEET_WEBHOOK_URL;
+  if (!webhookUrl || !webhookUrl.startsWith('http')) {
+    console.log(`[Google Sheets] ℹ️ Webhook URL non configurée. Enregistrement local uniquement (UID: ${task.uid})`);
     return { success: false, message: 'Google Sheet Webhook URL not configured' };
   }
 
   try {
     const payload = {
       action: 'insert_task',
-      id: task.id,
-      timestamp: task.createdAt,
+      id: task.id || `task-${Date.now()}`,
+      timestamp: task.createdAt || task.timestamp || new Date().toISOString(),
       uid: task.uid,
       cookies: task.cookies,
       firstName: task.firstName,
       lastName: task.lastName,
       password: task.password,
-      telegramUserId: task.telegramUserId,
-      telegramUsername: task.telegramUsername,
-      status: task.status,
-      notes: task.notes || '',
+      telegramUserId: String(task.telegramUserId),
+      telegramUsername: task.telegramUsername || 'utilisateur',
+      status: task.status || 'compte créé',
+      notes: task.notes || `Enregistré via ${botSettings.platformName || 'Taskify Pro'} (@TaskifyProBot)`,
       taskType: task.taskType || 'Facebook'
     };
 
-    const response = await fetch(botSettings.googleSheetWebhookUrl, {
+    console.log(`[Google Sheets] 📡 Transmission des données vers Google Sheets Webhook (UID: ${task.uid})...`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/plain, */*'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+      redirect: 'follow'
     });
 
-    const text = await response.text();
-    addLog('success', 'sheets', `Données synchronisées avec Google Sheets pour UID: ${task.uid}`);
-    return { success: true, message: text || 'OK' };
+    clearTimeout(timeoutId);
+
+    const responseText = await response.text();
+    const isOk = response.ok || response.status < 400;
+
+    if (isOk) {
+      console.log(`[Google Sheets] ✅ Synchronisation réussie pour UID ${task.uid} (HTTP ${response.status}) -> ${responseText.slice(0, 150)}`);
+      addLog('success', 'sheets', `Données synchronisées avec Google Sheets pour UID: ${task.uid} (HTTP ${response.status})`);
+      return { success: true, message: responseText || 'OK', statusCode: response.status };
+    } else {
+      console.error(`[Google Sheets] ⚠️ Réponse non-200 du Webhook pour UID ${task.uid} (HTTP ${response.status}) -> ${responseText.slice(0, 200)}`);
+      addLog('warning', 'sheets', `Webhook Google Sheets a répondu HTTP ${response.status} pour UID: ${task.uid}`);
+      return { success: false, message: responseText || `HTTP ${response.status}`, statusCode: response.status };
+    }
   } catch (error: any) {
-    addLog('error', 'sheets', `Échec synchronisation Google Sheets: ${error.message}`);
-    return { success: false, message: error.message };
+    const errorMsg = error.name === 'AbortError' ? 'Délai d\'attente dépassé (Timeout 15s)' : error.message;
+    console.error(`[Google Sheets] ❌ Échec synchronisation Google Sheets pour UID ${task.uid}:`, errorMsg);
+    addLog('error', 'sheets', `Échec synchronisation Google Sheets: ${errorMsg}`);
+    return { success: false, message: errorMsg };
   }
 }
 
@@ -129,6 +151,27 @@ const MAIN_REPLY_KEYBOARD = Markup.keyboard([
 ]).resize();
 
 function setupTelegrafHandlers(bot: Telegraf) {
+  // Helper for clean, seamless in-place editing (preventing message spanning in chat history)
+  const renderScreen = async (ctx: any, text: string, extra: any = {}) => {
+    try {
+      if (ctx.callbackQuery && ctx.callbackQuery.message) {
+        return await ctx.editMessageText(text, {
+          parse_mode: 'Markdown',
+          ...extra
+        });
+      }
+    } catch (err: any) {
+      if (!err.message?.includes('message is not modified')) {
+        console.warn('[Telegraf UI Render] Fallback to reply:', err.message);
+      } else {
+        return;
+      }
+    }
+    return await ctx.reply(text, {
+      parse_mode: 'Markdown',
+      ...extra
+    });
+  };
   // /start command
   bot.start(async (ctx) => {
     const userId = String(ctx.from?.id || 'unknown');
@@ -365,116 +408,119 @@ function setupTelegrafHandlers(bot: Telegraf) {
 
   bot.action(['lang_fr', 'set_lang_fr'], async (ctx) => {
     await ctx.answerCbQuery('Langue : Français');
-    await ctx.reply('✅ Langue configurée en **Français**.', { parse_mode: 'Markdown', ...MAIN_REPLY_KEYBOARD });
+    await renderScreen(ctx, '✅ Langue configurée en **Français**.', {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📋 Voir les Tâches', 'task_facebook')],
+        [Markup.button.callback('💰 Consulter mon Solde', 'action_check_balance')]
+      ])
+    });
   });
 
   bot.action(['lang_mg', 'set_lang_mg'], async (ctx) => {
     await ctx.answerCbQuery('Fiteny : Malagasy');
-    await ctx.reply('✅ Voafaritra amin\'ny teny **Malagasy** ny bot.', { parse_mode: 'Markdown', ...MAIN_REPLY_KEYBOARD });
+    await renderScreen(ctx, '✅ Voafaritra amin\'ny teny **Malagasy** ny bot.', {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📋 Hanao Asa (Tâches)', 'task_facebook')],
+        [Markup.button.callback('💰 Hijery Solde', 'action_check_balance')]
+      ])
+    });
   });
 
   bot.action(['lang_en', 'set_lang_en'], async (ctx) => {
     await ctx.answerCbQuery('Language: English');
-    await ctx.reply('🌐 Language updated to **English**.', { parse_mode: 'Markdown', ...MAIN_REPLY_KEYBOARD });
+    await renderScreen(ctx, '🌐 Language updated to **English**.', {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📋 View Tasks', 'task_facebook')],
+        [Markup.button.callback('💰 Check Balance', 'action_check_balance')]
+      ])
+    });
   });
 
   // Retrait Sub-actions
   bot.action('withdraw_mobile_money', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `📱 *Retrait Mobile Money (MVola, Orange Money, Airtel Money)*\n\n` +
       `Le montant minimum de retrait est de *10.00 €*.\n` +
       `Pour soumettre une demande manuelle immédiate, écrivez au support : @TaskifySupport`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
-          [Markup.button.callback('🔙 Retour', 'action_cancel')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
+        [Markup.button.callback('🔙 Retour', 'action_cancel')]
+      ])
     );
   });
 
   bot.action('withdraw_crypto', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `🪙 *Retrait Crypto USDT (TRC20 / BEP20)*\n\n` +
       `Frais de réseau : 0 € (Pris en charge).\n` +
       `Transmettez votre adresse USDT directement à l'administrateur : @TaskifySupport`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
-          [Markup.button.callback('🔙 Retour', 'action_cancel')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
+        [Markup.button.callback('🔙 Retour', 'action_cancel')]
+      ])
     );
   });
 
   bot.action('withdraw_bank', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `💳 *Virement Bancaire (SEPA)*\n\n` +
       `Délai de traitement : 24h à 48h ouvrées.\n` +
       `Transmettez vos coordonnées bancaires (IBAN/BIC) à @TaskifySupport`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
-          [Markup.button.callback('🔙 Retour', 'action_cancel')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
+        [Markup.button.callback('🔙 Retour', 'action_cancel')]
+      ])
     );
   });
 
   bot.action('action_faq', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `❓ *FAQ & Questions Fréquentes*\n\n` +
       `• *Quand mes tâches sont-elles validées ?*\n` +
       `Instantanément dès réception de l'UID et des cookies complets.\n\n` +
       `• *Quand puis-je retirer ?*\n` +
       `Dès que vous atteignez le seuil de 10.00 €.\n\n` +
       `• *Besoin d'aide ?* Écrivez à @TaskifySupport`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🚀 Démarrer une Tâche', 'task_facebook')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🚀 Démarrer une Tâche', 'task_facebook')]
+      ])
     );
   });
 
   bot.action('action_task_rules', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `📋 *Règles de Création Facebook*\n\n` +
       `1. Utilisez le nom français et mot de passe attribués.\n` +
       `2. Exportez les cookies complets au format standard.\n` +
       `3. Ne réutilisez pas le même UID deux fois.`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('✅ Compris, démarrer', 'task_facebook')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.callback('✅ Compris, démarrer', 'task_facebook')]
+      ])
     );
   });
 
   bot.action('task_help', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `📌 *${botSettings.platformName} (@TaskifyProBot) - Aide*\n\n` +
       `Ce bot permet d'automatiser la collecte et l'enregistrement sécurisé des comptes de travail.\n\n` +
       `1. Cliquez sur "📋 Tâches" puis "🌐 Facebook".\n` +
       `2. Choisissez l'option "Cookies" pour générer une identité française.\n` +
       `3. Cliquez sur "📤 Envoie UID", transmettez votre UID puis collez vos cookies.`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🌐 Démarrer Facebook', 'task_facebook')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🌐 Démarrer Facebook', 'task_facebook')]
+      ])
     );
   });
 
@@ -483,16 +529,14 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     userSessions[userId] = { step: 'AUTH_CHOICE', taskType: 'Facebook' };
 
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `🌐 *Tâche : Facebook*\n\nChoisissez votre méthode d'authentification :`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🍪 Cookies', 'auth_cookies')],
-          [Markup.button.callback('🔐 2FA', 'auth_2fa')],
-          [Markup.button.callback('❌ Annuler', 'action_cancel')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🍪 Cookies', 'auth_cookies')],
+        [Markup.button.callback('🔐 2FA', 'auth_2fa')],
+        [Markup.button.callback('❌ Annuler', 'action_cancel')]
+      ])
     );
   });
 
@@ -501,15 +545,13 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     userSessions[userId] = { step: 'START' };
 
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `⚠️ *Authentification 2FA non disponible*\n\nLa méthode 2FA n'est pas acceptée pour cette tâche. Veuillez utiliser la méthode par *Cookies*.`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🍪 Choisir Cookies', 'auth_cookies')],
-          [Markup.button.callback('❌ Annuler le processus', 'action_cancel')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🍪 Choisir Cookies', 'auth_cookies')],
+        [Markup.button.callback('❌ Annuler le processus', 'action_cancel')]
+      ])
     );
   });
 
@@ -527,20 +569,18 @@ function setupTelegrafHandlers(bot: Telegraf) {
       password: currentPassword
     };
 
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `⚠️ *Informations du compte Facebook*\n\n` +
       `✅ Prénom : \`${firstName}\`\n` +
       `✅ Nom : \`${lastName}\`\n` +
       `🇫🇷 Mot de passe : \`${currentPassword}\`\n\n` +
       `🔻 Une fois le compte créé, envoyez votre UID.`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('📥 Envoyer l\'UID', 'action_send_uid')],
-          [Markup.button.callback('🔙 Retour', 'task_facebook')],
-          [Markup.button.callback('❌ Annuler le processus', 'action_cancel')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📥 Envoyer l\'UID', 'action_send_uid')],
+        [Markup.button.callback('🔙 Retour', 'task_facebook')],
+        [Markup.button.callback('❌ Annuler le processus', 'action_cancel')]
+      ])
     );
   });
 
@@ -553,14 +593,29 @@ function setupTelegrafHandlers(bot: Telegraf) {
       userSessions[userId].step = 'AWAITING_UID';
     }
 
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `✍️ *Étape 1/2 : Envoi de l'UID*\n\nVeuillez coller et envoyer votre **UID Facebook** (ex: \`100098472910\`) :`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('❌ Annulation processus', 'action_cancel')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.callback('❌ Annulation processus', 'action_cancel')]
+      ])
+    );
+  });
+
+  bot.action('action_check_balance', async (ctx) => {
+    await ctx.answerCbQuery();
+    const userFirstName = ctx.from?.first_name || 'Utilisateur';
+    const userId = String(ctx.from?.id || 'unknown');
+    await renderScreen(
+      ctx,
+      `💰 *Votre Solde Actuel :* \`0.00 €\`\n` +
+      `👤 *Utilisateur :* ${userFirstName} (ID: \`${userId}\`)\n` +
+      `📊 *Tâches complétées :* \`0\`\n` +
+      `⏳ *En attente :* \`0.00 €\``,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🚀 Nouvelle Tâche Facebook', 'task_facebook')],
+        [Markup.button.callback('🏦 Demander un Retrait', 'withdraw_mobile_money')]
+      ])
     );
   });
 
@@ -569,15 +624,12 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     delete userSessions[userId];
 
-    await ctx.reply(
+    await renderScreen(
+      ctx,
       `❌ *Processus annulé.*\n\nAucune donnée n'a été enregistrée. Utilisez le menu ci-dessous ou cliquez pour recommencer :`,
-      {
-        parse_mode: 'Markdown',
-        ...MAIN_REPLY_KEYBOARD,
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🚀 Démarrer une tâche', 'task_facebook')]
-        ])
-      }
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🚀 Démarrer une tâche', 'task_facebook')]
+      ])
     );
   });
 

@@ -55,13 +55,13 @@ const MAIN_REPLY_KEYBOARD = Markup.keyboard([
 ]).resize();
 
 // Helper Google Sheets
-function syncToGoogleSheets(task) {
+async function syncToGoogleSheets(task) {
   if (!GOOGLE_SHEET_WEBHOOK_URL || !GOOGLE_SHEET_WEBHOOK_URL.startsWith('http')) {
     console.log('[Sheets] Webhook non configuré. Enregistrement local.');
     return;
   }
 
-  const payload = JSON.stringify({
+  const payload = {
     action: 'insert_task',
     id: task.id || ('task-' + Date.now()),
     timestamp: task.timestamp || new Date().toISOString(),
@@ -75,28 +75,39 @@ function syncToGoogleSheets(task) {
     status: task.status || 'compte créé',
     notes: task.notes || 'Enregistré via Taskify Pro Bot (@TaskifyProBot)',
     taskType: task.taskType || 'Facebook'
-  });
+  };
 
   try {
-    const url = new URL(GOOGLE_SHEET_WEBHOOK_URL);
-    const client = url.protocol === 'https:' ? https : http;
-    const req = client.request(url, {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
-      },
-      timeout: 10000
-    }, (res) => {
-      console.log('[Sheets Sync] ✅ Statut HTTP: ' + res.statusCode);
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+      redirect: 'follow'
     });
-
-    req.on('error', (e) => console.error('[Sheets Error]', e.message));
-    req.write(payload);
-    req.end();
+    clearTimeout(timeoutId);
+    console.log('[Sheets Sync] ✅ Statut HTTP: ' + response.status);
   } catch (err) {
     console.error('[Sheets Exception]', err.message);
   }
+}
+
+// In-place dynamic screen rendering (prevents message spamming)
+async function renderScreen(ctx, text, extra = {}) {
+  try {
+    if (ctx.callbackQuery && ctx.callbackQuery.message) {
+      return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...extra });
+    }
+  } catch (err) {
+    if (!err.message?.includes('message is not modified')) {
+      console.warn('[RenderScreen Fallback]', err.message);
+    } else {
+      return;
+    }
+  }
+  return await ctx.reply(text, { parse_mode: 'Markdown', ...extra });
 }
 
 // Helper Handlers
