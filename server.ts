@@ -2,6 +2,8 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { Telegraf, Markup } from 'telegraf';
+import { testDatabaseConnection } from './src/services/database';
+import { initializeDatabase } from './src/services/databaseInit';
 
 const app = express();
 const PORT = 3000;
@@ -2030,24 +2032,76 @@ function doGet(e) {
 // ----------------------------------------------------
 // VITE MIDDLEWARE / SPA STATIC HANDLER
 // ----------------------------------------------------
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa'
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Taskify Pro server running on http://0.0.0.0:${PORT}`);
-  });
+async function startServer() {
+  try {
+    // -----------------------------------------------
+    // DATABASE
+    // -----------------------------------------------
+
+    await initializeDatabase();
+
+    const dbConnected = await testDatabaseConnection();
+
+    if (!dbConnected) {
+      throw new Error('PostgreSQL connection failed');
+    }
+
+    console.log('✅ PostgreSQL ready');
+
+    // -----------------------------------------------
+    // VITE / PRODUCTION
+    // -----------------------------------------------
+
+    if (process.env.NODE_ENV !== 'production') {
+      const vite = await createViteServer({
+        server: {
+          middlewareMode: true
+        },
+        appType: 'spa'
+      });
+
+      app.use(vite.middlewares);
+
+    } else {
+      const distPath = path.join(
+        process.cwd(),
+        'dist'
+      );
+
+      app.use(express.static(distPath));
+
+      app.get('*', (req, res) => {
+        res.sendFile(
+          path.join(
+            distPath,
+            'index.html'
+          )
+        );
+      });
+    }
+
+    // -----------------------------------------------
+    // START SERVER
+    // -----------------------------------------------
+    app.listen(
+      PORT,
+      '0.0.0.0',
+      () => {
+        console.log(
+          `🚀 Taskify Pro server running on http://0.0.0.0:${PORT}`
+        );
+      }
+    );
+
+  } catch (error) {
+    console.error(
+      '❌ Failed to start Taskify Pro:',
+      error
+    );
+
+    process.exit(1);
+  }
 }
 
 startServer();
