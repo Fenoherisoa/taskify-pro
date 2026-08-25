@@ -1745,7 +1745,7 @@ app.post('/api/bot/simulate-step', (req, res) => {
   });
 });
 
-// 8. Test Google Sheets Webhook
+// 8. Test Google Sheets Webhook (Mampiasa GET sy URLSearchParams)
 app.post('/api/test-google-sheets', async (req, res) => {
   const { url, task } = req.body;
   const targetUrl = url || botSettings.googleSheetWebhookUrl;
@@ -1765,10 +1765,10 @@ app.post('/api/test-google-sheets', async (req, res) => {
       telegramUserId: 'test_admin',
       telegramUsername: 'admin_taskify',
       status: 'compte créé',
-      notes: 'Ligne de test générée par le tableau de bord'
+      notes: 'Test de connexion depuis le dashboard'
     };
 
-    // Mamadika ho Query Parameters (GET) mba handeha tsara amin'ny Google Apps Script
+    // Mamadika ho Parameters sahaza ho an'ny doGet(e)
     const params = new URLSearchParams({
       id: dataToSend.id || '',
       uid: dataToSend.uid || '',
@@ -1784,24 +1784,18 @@ app.post('/api/test-google-sheets', async (req, res) => {
 
     const fullUrl = `${targetUrl}?${params.toString()}`;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
+    // Mandefa GET request mankany amin'ny Google Apps Script
     const response = await fetch(fullUrl, {
-      method: 'GET', // Ovay ho GET
-      signal: controller.signal,
+      method: 'GET',
       redirect: 'follow'
     });
 
-    clearTimeout(timeoutId);
-
     const responseText = await response.text();
-    addLog('success', 'sheets', `Transmission réussie vers ${targetUrl}`);
+    addLog('success', 'sheets', `Données transmises avec succès vers Google Sheets`);
     res.json({ success: true, response: responseText });
   } catch (error: any) {
-    const errorMsg = error.name === 'AbortError' ? 'Délai d\'attente dépassé (Timeout 15s)' : error.message;
-    addLog('error', 'sheets', `Erreur de test Google Sheets: ${errorMsg}`);
-    res.status(500).json({ success: false, error: errorMsg });
+    addLog('error', 'sheets', `Erreur de test Google Sheets: ${error.message}`);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
