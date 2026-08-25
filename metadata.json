@@ -1,0 +1,6 @@
+{
+  "name": "Taskify Pro",
+  "description": "Production-ready management dashboard and Telegram bot hub (@TaskifyProBot) for automated task workflows, UID/Cookies collection, account status monitoring, and Google Apps Script database synchronization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
