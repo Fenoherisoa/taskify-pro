@@ -1301,7 +1301,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
       `⚠️ *Informations du compte Facebook*\n\n` +
       `✅ Prénom : \`${firstName}\`\n` +
       `✅ Nom : \`${lastName}\`\n` +
-      `🔑 Mot de passe : \`${currentPassword}\`\n` +
+      `🔑 MDP: \`${currentPassword}\`\n` +
       `💵 Gain : \`$${TASK_REWARD_USD.toFixed(2)} USD\`\n\n` +
       `🔻 Une fois le compte créé, envoyez votre UID :`,
       Markup.inlineKeyboard([
