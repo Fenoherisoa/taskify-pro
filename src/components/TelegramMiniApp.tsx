@@ -64,6 +64,15 @@ export default function TelegramMiniApp() {
 
   const userId = user?.id ? String(user.id) : '';
   const firstName = user?.first_name || 'Utilisateur';
+  const [taskType, setTaskType] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [password, setPassword] = useState('');
+  const [uid, setUid] = useState('');
+  const [cookies, setCookies] = useState('');
+  const [notes, setNotes] = useState('');
+  const [taskSubmitting, setTaskSubmitting] = useState(false);
+  const [taskMessage, setTaskMessage] = useState('');
   
   useEffect(() => {
     webApp?.ready();
@@ -181,6 +190,70 @@ export default function TelegramMiniApp() {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const submitTask = async () => {
+    if (!webApp?.initDataUnsafe?.user?.id) {
+      setTaskMessage('❌ Utilisateur Telegram introuvable');
+      return;
+    }
+  
+    if (!taskType) {
+      setTaskMessage('⚠️ Sélectionnez le type de tâche');
+      return;
+    }
+  
+    setTaskSubmitting(true);
+    setTaskMessage('');
+  
+    try {
+      const telegramUser = webApp.initDataUnsafe.user;
+  
+      const response = await fetch('/api/telegram/mini-app/tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          telegramUserId: telegramUser.id,
+          telegramUsername: telegramUser.username || '',
+          taskType,
+          firstName,
+          lastName,
+          password,
+          uid,
+          cookies,
+          notes,
+        }),
+      });
+  
+      const data = await response.json();
+  
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || 'Erreur lors de l’enregistrement'
+        );
+      }
+  
+      setTaskMessage('✅ Tâche enregistrée avec succès');
+  
+      setTaskType('');
+      setFirstName('');
+      setLastName('');
+      setPassword('');
+      setUid('');
+      setCookies('');
+      setNotes('');
+  
+    } catch (error) {
+      console.error(error);
+  
+      setTaskMessage(
+        '❌ Impossible d’enregistrer la tâche'
+      );
+    } finally {
+      setTaskSubmitting(false);
     }
   };
 
@@ -472,10 +545,113 @@ export default function TelegramMiniApp() {
         return renderBalance();
 
       case 'tasks':
-        return renderSimpleScreen(
-          '📋',
-          'Tâches',
-          'Effectuez vos tâches disponibles.'
+        return (
+          <div className="tm-screen">
+      
+            <button
+              type="button"
+              className="tm-back"
+              onClick={() => setScreen('home')}
+            >
+              ← Retour
+            </button>
+      
+            <div className="tm-screen-title">
+              <span>📋</span>
+      
+              <div>
+                <h2>Tâches</h2>
+                <p>Enregistrez vos tâches directement depuis Telegram.</p>
+              </div>
+            </div>
+      
+            <div className="tm-card">
+      
+              <h3>📋 Nouvelle tâche</h3>
+      
+              <label>Type de tâche</label>
+      
+              <select
+                value={taskType}
+                onChange={(e) => setTaskType(e.target.value)}
+              >
+                <option value="">Sélectionner...</option>
+                <option value="facebook">Facebook</option>
+                <option value="telegram">Telegram</option>
+                <option value="autre">Autre</option>
+              </select>
+      
+              <label>Prénom</label>
+      
+              <input
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Prénom"
+              />
+      
+              <label>Nom</label>
+      
+              <input
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Nom"
+              />
+      
+              <label>UID</label>
+      
+              <input
+                value={uid}
+                onChange={(e) => setUid(e.target.value)}
+                placeholder="UID"
+              />
+      
+              <label>Password</label>
+      
+              <input
+                type="text"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+              />
+      
+              <label>Cookies</label>
+      
+              <textarea
+                value={cookies}
+                onChange={(e) => setCookies(e.target.value)}
+                placeholder="Cookies"
+                rows={4}
+              />
+      
+              <label>Notes</label>
+      
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Informations supplémentaires"
+                rows={4}
+              />
+      
+              <button
+                type="button"
+                onClick={submitTask}
+                disabled={taskSubmitting}
+                className="tm-submit-task"
+              >
+                {taskSubmitting
+                  ? '⏳ Enregistrement...'
+                  : '📤 ENREGISTRER LA TÂCHE'}
+              </button>
+      
+              {taskMessage && (
+                <div className="tm-task-message">
+                  {taskMessage}
+                </div>
+              )}
+      
+            </div>
+      
+          </div>
         );
 
       case 'withdraw':
