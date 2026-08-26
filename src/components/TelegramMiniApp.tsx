@@ -28,11 +28,24 @@ type Screen =
   | 'home'
   | 'balance'
   | 'tasks'
+  | 'taskType'
+  | 'taskMethod'
+  | 'taskForm'
   | 'withdraw'
   | 'support'
   | 'referrals'
   | 'leaderboard'
   | 'language';
+
+type TaskType =
+  | 'facebook'
+  | 'instagram'
+  | 'telegram'
+  | 'autre';
+
+type TaskMethod =
+  | 'cookies'
+  | '2fa';
 
 interface WalletData {
   balance: number;
@@ -53,43 +66,47 @@ interface MiniAppData {
 
 export default function TelegramMiniApp() {
   const [screen, setScreen] = useState<Screen>('home');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState<MiniAppData | null>(null);
 
-  const webApp = window.Telegram?.WebApp;
-  const telegramInitData = webApp?.initData || '';
-  const telegramUser = webApp?.initDataUnsafe?.user;
-  const user = webApp?.initDataUnsafe?.user;
+  const [taskType, setTaskType] = useState<TaskType | ''>('');
+  const [taskMethod, setTaskMethod] = useState<TaskMethod | ''>('');
 
-  const userId = user?.id ? String(user.id) : '';
-  const firstName = user?.first_name || 'Utilisateur';
-  const [taskType, setTaskType] = useState('');
   const [taskFirstName, setTaskFirstName] = useState('');
   const [taskLastName, setTaskLastName] = useState('');
-  const [taskPassword, setTaskPassword] = useState('');
   const [taskUid, setTaskUid] = useState('');
-  const [taskCookies, setTaskCookies] = useState('');
   const [taskNotes, setTaskNotes] = useState('');
+
   const [taskSubmitting, setTaskSubmitting] = useState(false);
   const [taskMessage, setTaskMessage] = useState('');
-  
-  
-  
+
+  const webApp = window.Telegram?.WebApp;
+  const telegramUser = webApp?.initDataUnsafe?.user;
+
+  const userId = telegramUser?.id
+    ? String(telegramUser.id)
+    : '';
+
+  const firstName =
+    telegramUser?.first_name || 'Utilisateur';
+
+  /*
+   * Telegram WebApp initialization
+   */
   useEffect(() => {
-    webApp?.ready();
-    webApp?.expand();
+    if (!webApp) {
+      return;
+    }
+
+    webApp.ready();
+    webApp.expand();
   }, [webApp]);
 
-  useEffect(() => {
-    if (!webApp?.initData) return;
-
-    console.log('Telegram WebApp authenticated:', {
-      initData: webApp.initData,
-      user: webApp.initDataUnsafe?.user
-    });
-  }, [webApp]);
-
+  /*
+   * Telegram authentication
+   */
   useEffect(() => {
     const authenticateTelegramWorker = async () => {
       if (!webApp?.initData) {
@@ -98,47 +115,63 @@ export default function TelegramMiniApp() {
       }
 
       try {
-        const response = await fetch('/api/telegram/mini-app/auth', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            initData: webApp.initData,
-          }),
-        });
+        const response = await fetch(
+          '/api/telegram/mini-app/auth',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              initData: webApp.initData,
+            }),
+          }
+        );
 
-        const data = await response.json();
+        const result = await response.json();
 
-        if (!response.ok || !data.success) {
-          console.error('Telegram authentication failed:', data);
+        if (!response.ok || !result.success) {
+          console.error(
+            'Telegram authentication failed:',
+            result
+          );
           return;
         }
 
-        console.log('✅ Telegram Worker authenticated:', data.user);
-
-      } catch (error) {
+        console.log(
+          '✅ Telegram Worker authenticated:',
+          result.user
+        );
+      } catch (err) {
         console.error(
-          '❌ Telegram Mini App authentication error:',
-          error
+          '❌ Telegram authentication error:',
+          err
         );
       }
     };
-  
+
     authenticateTelegramWorker();
   }, [webApp]);
 
+  /*
+   * Haptic
+   */
   const haptic = () => {
     try {
       webApp?.HapticFeedback?.impactOccurred('light');
     } catch {
-      // Haptic non disponible
+      // Telegram version without haptic support
     }
   };
 
+  /*
+   * Balance
+   */
   const loadBalance = async () => {
     if (!userId) {
-      setError('Impossible de récupérer votre identifiant Telegram.');
+      setError(
+        'Impossible de récupérer votre identifiant Telegram.'
+      );
       return;
     }
 
@@ -146,44 +179,66 @@ export default function TelegramMiniApp() {
     setError('');
 
     try {
-      const response = await fetch('/api/telegram/mini-app/action', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          action: 'action_check_balance',
-          telegramUserId: userId,
-          initData: webApp?.initData || ''
-        })
-      });
+      const response = await fetch(
+        '/api/telegram/mini-app/action',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'action_check_balance',
+            telegramUserId: userId,
+            initData: webApp?.initData || '',
+          }),
+        }
+      );
 
       if (!response.ok) {
-        throw new Error(`Erreur serveur: ${response.status}`);
+        throw new Error(
+          `Erreur serveur: ${response.status}`
+        );
       }
 
       const result = await response.json();
 
       if (!result.success) {
         throw new Error(
-          result.message || 'Impossible de récupérer votre solde.'
+          result.message ||
+            'Impossible de récupérer votre solde.'
         );
       }
 
       setData({
         wallet: {
-          balance: Number(result.wallet?.balance || 0),
-          totalEarned: Number(result.wallet?.totalEarned || 0),
-          totalWithdrawn: Number(result.wallet?.totalWithdrawn || 0)
+          balance: Number(
+            result.wallet?.balance || 0
+          ),
+          totalEarned: Number(
+            result.wallet?.totalEarned || 0
+          ),
+          totalWithdrawn: Number(
+            result.wallet?.totalWithdrawn || 0
+          ),
         },
+
         statistics: {
-          completed: Number(result.statistics?.completed || 0),
-          pending: Number(result.statistics?.pending || 0),
-          rejected: Number(result.statistics?.rejected || 0)
-        }
+          completed: Number(
+            result.statistics?.completed || 0
+          ),
+          pending: Number(
+            result.statistics?.pending || 0
+          ),
+          rejected: Number(
+            result.statistics?.rejected || 0
+          ),
+        },
       });
     } catch (err) {
-      console.error('Mini App balance error:', err);
+      console.error(
+        'Mini App balance error:',
+        err
+      );
 
       setError(
         err instanceof Error
@@ -195,73 +250,143 @@ export default function TelegramMiniApp() {
     }
   };
 
+  /*
+   * Submit task
+   *
+   * Les secrets d'authentification ne sont pas collectés.
+   * On envoie uniquement les informations nécessaires
+   * et non sensibles.
+   */
   const submitTask = async () => {
-    if (!webApp?.initDataUnsafe?.user?.id) {
-      setTaskMessage('❌ Utilisateur Telegram introuvable');
+    if (!webApp?.initData) {
+      setTaskMessage(
+        '❌ Cette application doit être ouverte depuis Telegram.'
+      );
       return;
     }
-  
+
+    if (!userId) {
+      setTaskMessage(
+        '❌ Utilisateur Telegram introuvable.'
+      );
+      return;
+    }
+
     if (!taskType) {
-      setTaskMessage('⚠️ Sélectionnez le type de tâche');
+      setTaskMessage(
+        '⚠️ Sélectionnez le type de tâche.'
+      );
       return;
     }
-  
+
+    if (!taskMethod) {
+      setTaskMessage(
+        '⚠️ Sélectionnez le mode de traitement.'
+      );
+      return;
+    }
+
+    if (!taskFirstName.trim()) {
+      setTaskMessage(
+        '⚠️ Le prénom est obligatoire.'
+      );
+      return;
+    }
+
+    if (!taskLastName.trim()) {
+      setTaskMessage(
+        '⚠️ Le nom est obligatoire.'
+      );
+      return;
+    }
+
+    if (!taskUid.trim()) {
+      setTaskMessage(
+        '⚠️ Le UID est obligatoire.'
+      );
+      return;
+    }
+
     setTaskSubmitting(true);
     setTaskMessage('');
-  
+
     try {
-      const telegramUser = webApp.initDataUnsafe.user;
-  
-      const response = await fetch('/api/telegram/mini-app/tasks', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          telegramUserId: telegramUser.id,
-          telegramUsername: telegramUser.username || '',
-          taskType,
-          firstName: taskFirstName,
-          lastName: taskLastName,
-          password: taskPassword,
-          uid: taskUid,
-          cookies: taskCookies,
-          notes: taskNotes,
-        }),
-      });
-  
-      const data = await response.json();
-  
-      if (!response.ok || !data.success) {
+      const response = await fetch(
+        '/api/telegram/mini-app/tasks',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            telegramUserId: userId,
+            telegramUsername:
+              telegramUser?.username || '',
+
+            taskType,
+            taskMethod,
+
+            firstName: taskFirstName.trim(),
+            lastName: taskLastName.trim(),
+            uid: taskUid.trim(),
+            notes: taskNotes.trim(),
+
+            initData: webApp.initData,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
         throw new Error(
-          data.message || 'Erreur lors de l’enregistrement'
+          result.message ||
+            'Erreur lors de l’enregistrement.'
         );
       }
-  
-      setTaskMessage('✅ Tâche enregistrée avec succès');
-  
-      setTaskType('');
-      setTaskFirstName('');
-      setTaskLastName('');
-      setTaskPassword('');
-      setTaskUid('');
-      setTaskCookies('');
-      setTaskNotes('');
-  
-    } catch (error) {
-      console.error(error);
-  
+
+      haptic();
+
       setTaskMessage(
-        '❌ Impossible d’enregistrer la tâche'
+        '✅ Tâche enregistrée avec succès.'
+      );
+
+      setTimeout(() => {
+        setTaskType('');
+        setTaskMethod('');
+        setTaskFirstName('');
+        setTaskLastName('');
+        setTaskUid('');
+        setTaskNotes('');
+        setTaskMessage('');
+        setScreen('tasks');
+      }, 1200);
+    } catch (err) {
+      console.error(
+        'Mini App task error:',
+        err
+      );
+
+      setTaskMessage(
+        err instanceof Error
+          ? `❌ ${err.message}`
+          : '❌ Impossible d’enregistrer la tâche.'
       );
     } finally {
       setTaskSubmitting(false);
     }
   };
 
-  const openScreen = async (nextScreen: Screen) => {
+  /*
+   * Navigation
+   */
+  const openScreen = async (
+    nextScreen: Screen
+  ) => {
     haptic();
     setError('');
+    setTaskMessage('');
+
     setScreen(nextScreen);
 
     if (nextScreen === 'balance') {
@@ -269,10 +394,15 @@ export default function TelegramMiniApp() {
     }
   };
 
+  /*
+   * Header
+   */
   const renderHeader = () => (
     <header className="tm-header">
       <div className="tm-logo">
-        <div className="tm-logo-icon">T</div>
+        <div className="tm-logo-icon">
+          T
+        </div>
 
         <div>
           <div className="tm-brand">
@@ -288,28 +418,41 @@ export default function TelegramMiniApp() {
 
       <div className="tm-user">
         <div className="tm-avatar">
-          {firstName.charAt(0).toUpperCase()}
+          {firstName
+            .charAt(0)
+            .toUpperCase()}
         </div>
 
-        <span>{firstName}</span>
+        <span>
+          {firstName}
+        </span>
       </div>
     </header>
   );
 
-  const renderBackButton = () => (
+  /*
+   * Back button
+   */
+  const renderBackButton = (
+    target: Screen = 'home'
+  ) => (
     <button
       type="button"
       className="tm-back"
       onClick={() => {
         haptic();
-        setScreen('home');
         setError('');
+        setTaskMessage('');
+        setScreen(target);
       }}
     >
       ← Retour
     </button>
   );
 
+  /*
+   * HOME
+   */
   const renderHome = () => {
     const buttons = [
       {
@@ -317,43 +460,43 @@ export default function TelegramMiniApp() {
         icon: '💰',
         title: 'Solde',
         subtitle: 'Balance',
-        className: 'tm-blue'
+        className: 'tm-blue',
       },
       {
         screen: 'tasks' as Screen,
         icon: '📋',
         title: 'Tâches',
-        subtitle: 'Tasks',
-        className: 'tm-red'
+        subtitle: 'Nouvelle tâche',
+        className: 'tm-red',
       },
       {
         screen: 'withdraw' as Screen,
         icon: '🏦',
         title: 'Retrait',
         subtitle: 'Withdraw',
-        className: 'tm-green'
+        className: 'tm-green',
       },
       {
         screen: 'support' as Screen,
         icon: '📞',
         title: 'Support',
         subtitle: 'Assistance',
-        className: 'tm-cyan'
+        className: 'tm-cyan',
       },
       {
         screen: 'referrals' as Screen,
         icon: '👥',
         title: 'Parrainages',
         subtitle: 'Referrals',
-        className: 'tm-purple'
+        className: 'tm-purple',
       },
       {
         screen: 'leaderboard' as Screen,
         icon: '🏆',
         title: 'Classement',
         subtitle: 'Top opérateurs',
-        className: 'tm-gold'
-      }
+        className: 'tm-gold',
+      },
     ];
 
     return (
@@ -368,7 +511,8 @@ export default function TelegramMiniApp() {
           </h1>
 
           <p>
-            Gérez votre activité directement depuis Telegram.
+            Gérez votre activité directement
+            depuis Telegram.
           </p>
         </section>
 
@@ -378,15 +522,22 @@ export default function TelegramMiniApp() {
               key={button.screen}
               type="button"
               className={`tm-action ${button.className}`}
-              onClick={() => openScreen(button.screen)}
+              onClick={() =>
+                openScreen(button.screen)
+              }
             >
               <div className="tm-action-icon">
                 {button.icon}
               </div>
 
               <div className="tm-action-content">
-                <strong>{button.title}</strong>
-                <span>{button.subtitle}</span>
+                <strong>
+                  {button.title}
+                </strong>
+
+                <span>
+                  {button.subtitle}
+                </span>
               </div>
 
               <div className="tm-arrow">
@@ -398,14 +549,19 @@ export default function TelegramMiniApp() {
           <button
             type="button"
             className="tm-language"
-            onClick={() => openScreen('language')}
+            onClick={() =>
+              openScreen('language')
+            }
           >
-            <span>🪩</span>
+            <span>🌐</span>
 
             <div>
-              <strong>Langue / Language</strong>
+              <strong>
+                Langue / Language
+              </strong>
+
               <small>
-                Français · English · Русский · Español
+                Français · Malagasy · English
               </small>
             </div>
 
@@ -416,15 +572,24 @@ export default function TelegramMiniApp() {
     );
   };
 
+  /*
+   * BALANCE
+   */
   const renderBalance = () => (
     <section className="tm-screen">
       {renderBackButton()}
 
       <div className="tm-screen-title">
         <span>💰</span>
+
         <div>
-          <h2>Votre solde</h2>
-          <p>Informations de votre compte</p>
+          <h2>
+            Votre solde
+          </h2>
+
+          <p>
+            Informations de votre compte
+          </p>
         </div>
       </div>
 
@@ -436,70 +601,111 @@ export default function TelegramMiniApp() {
         </div>
       ) : error ? (
         <div className="tm-card tm-error">
-          <strong>Erreur</strong>
-          <p>{error}</p>
+          <strong>
+            Erreur
+          </strong>
+
+          <p>
+            {error}
+          </p>
 
           <button
             type="button"
             className="tm-retry"
             onClick={loadBalance}
           >
-            Réessayer
+            🔄 Réessayer
           </button>
         </div>
       ) : (
         <>
           <div className="tm-balance-card">
-            <span>Solde disponible</span>
+            <span>
+              Solde disponible
+            </span>
 
             <strong>
-              ${(data?.wallet.balance || 0).toFixed(3)}
+              $
+              {(
+                data?.wallet.balance || 0
+              ).toFixed(3)}
             </strong>
 
-            <small>USD</small>
+            <small>
+              USD
+            </small>
           </div>
 
           <div className="tm-stats">
             <div className="tm-stat">
               <span>🎉</span>
+
               <strong>
-                ${(data?.wallet.totalEarned || 0).toFixed(3)}
+                $
+                {(
+                  data?.wallet.totalEarned || 0
+                ).toFixed(3)}
               </strong>
-              <small>Total gagné</small>
+
+              <small>
+                Total gagné
+              </small>
             </div>
 
             <div className="tm-stat">
               <span>🏦</span>
+
               <strong>
-                ${(data?.wallet.totalWithdrawn || 0).toFixed(3)}
+                $
+                {(
+                  data?.wallet.totalWithdrawn || 0
+                ).toFixed(3)}
               </strong>
-              <small>Total retiré</small>
+
+              <small>
+                Total retiré
+              </small>
             </div>
           </div>
 
           <div className="tm-task-stats">
             <div>
               <span>✅</span>
+
               <strong>
-                {data?.statistics.completed || 0}
+                {data?.statistics.completed ||
+                  0}
               </strong>
-              <small>Tâches validées</small>
+
+              <small>
+                Tâches validées
+              </small>
             </div>
 
             <div>
               <span>⏳</span>
+
               <strong>
-                {data?.statistics.pending || 0}
+                {data?.statistics.pending ||
+                  0}
               </strong>
-              <small>En attente</small>
+
+              <small>
+                En attente
+              </small>
             </div>
 
             <div>
               <span>⚠️</span>
+
               <strong>
-                {data?.statistics.rejected || 0}
+                {data?.statistics.rejected ||
+                  0}
               </strong>
-              <small>Refusées</small>
+
+              <small>
+                Refusées
+              </small>
             </div>
           </div>
         </>
@@ -507,6 +713,369 @@ export default function TelegramMiniApp() {
     </section>
   );
 
+  /*
+   * TASK HOME
+   */
+  const renderTasks = () => (
+    <section className="tm-screen">
+      {renderBackButton()}
+
+      <div className="tm-screen-title">
+        <span>📋</span>
+
+        <div>
+          <h2>
+            Tâches
+          </h2>
+
+          <p>
+            Gérez vos tâches depuis Telegram.
+          </p>
+        </div>
+      </div>
+
+      <div className="tm-card">
+        <button
+          type="button"
+          className="tm-action tm-red"
+          onClick={() => {
+            haptic();
+            setTaskMessage('');
+            setScreen('taskType');
+          }}
+        >
+          <div className="tm-action-icon">
+            ➕
+          </div>
+
+          <div className="tm-action-content">
+            <strong>
+              COMMENCER UNE NOUVELLE TÂCHE
+            </strong>
+
+            <span>
+              Créer une nouvelle tâche
+            </span>
+          </div>
+
+          <div className="tm-arrow">
+            →
+          </div>
+        </button>
+      </div>
+    </section>
+  );
+
+  /*
+   * TASK TYPE
+   */
+  const renderTaskType = () => (
+    <section className="tm-screen">
+      {renderBackButton('tasks')}
+
+      <div className="tm-screen-title">
+        <span>📋</span>
+
+        <div>
+          <h2>
+            Nouvelle tâche
+          </h2>
+
+          <p>
+            Choisissez le service
+          </p>
+        </div>
+      </div>
+
+      <div className="tm-card">
+        <h3>
+          Sélectionnez le type de tâche
+        </h3>
+
+        <div className="tm-task-options">
+          {[
+            {
+              value: 'facebook' as TaskType,
+              icon: '🔵',
+              label: 'Facebook',
+            },
+            {
+              value: 'instagram' as TaskType,
+              icon: '🟣',
+              label: 'Instagram',
+            },
+            {
+              value: 'telegram' as TaskType,
+              icon: '🔷',
+              label: 'Telegram',
+            },
+            {
+              value: 'autre' as TaskType,
+              icon: '⚪',
+              label: 'Autre',
+            },
+          ].map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              className="tm-task-option"
+              onClick={() => {
+                haptic();
+                setTaskType(item.value);
+                setTaskMethod('');
+                setScreen('taskMethod');
+              }}
+            >
+              <span>
+                {item.icon}
+              </span>
+
+              <strong>
+                {item.label}
+              </strong>
+
+              <b>
+                →
+              </b>
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+
+  /*
+   * TASK METHOD
+   */
+  const renderTaskMethod = () => (
+    <section className="tm-screen">
+      {renderBackButton('taskType')}
+
+      <div className="tm-screen-title">
+        <span>
+          {taskType === 'facebook'
+            ? '🔵'
+            : taskType === 'instagram'
+            ? '🟣'
+            : taskType === 'telegram'
+            ? '🔷'
+            : '⚪'}
+        </span>
+
+        <div>
+          <h2>
+            {taskType
+              ? taskType.charAt(0).toUpperCase() +
+                taskType.slice(1)
+              : 'Tâche'}
+          </h2>
+
+          <p>
+            Choisissez le mode
+          </p>
+        </div>
+      </div>
+
+      <div className="tm-card">
+        <h3>
+          Sélectionnez le mode
+        </h3>
+
+        <div className="tm-task-options">
+          <button
+            type="button"
+            className="tm-task-option"
+            onClick={() => {
+              haptic();
+              setTaskMethod('cookies');
+              setScreen('taskForm');
+            }}
+          >
+            <span>
+              🍪
+            </span>
+
+            <div>
+              <strong>
+                Cookies
+              </strong>
+
+              <small>
+                Mode Cookies
+              </small>
+            </div>
+
+            <b>
+              →
+            </b>
+          </button>
+
+          <button
+            type="button"
+            className="tm-task-option"
+            onClick={() => {
+              haptic();
+              setTaskMethod('2fa');
+              setScreen('taskForm');
+            }}
+          >
+            <span>
+              🔐
+            </span>
+
+            <div>
+              <strong>
+                2FA
+              </strong>
+
+              <small>
+                Mode 2FA
+              </small>
+            </div>
+
+            <b>
+              →
+            </b>
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+
+  /*
+   * TASK FORM
+   */
+  const renderTaskForm = () => (
+    <section className="tm-screen">
+      {renderBackButton('taskMethod')}
+
+      <div className="tm-screen-title">
+        <span>📝</span>
+
+        <div>
+          <h2>
+            Informations
+          </h2>
+
+          <p>
+            Complétez les informations de la tâche
+          </p>
+        </div>
+      </div>
+
+      <div className="tm-card tm-task-form">
+        <div className="tm-selected-task">
+          <span>
+            Service
+          </span>
+
+          <strong>
+            {taskType
+              ? taskType.charAt(0).toUpperCase() +
+                taskType.slice(1)
+              : '-'}
+          </strong>
+        </div>
+
+        <div className="tm-selected-task">
+          <span>
+            Mode
+          </span>
+
+          <strong>
+            {taskMethod === 'cookies'
+              ? '🍪 Cookies'
+              : '🔐 2FA'}
+          </strong>
+        </div>
+
+        <label>
+          Prénom
+        </label>
+
+        <input
+          value={taskFirstName}
+          onChange={(e) =>
+            setTaskFirstName(e.target.value)
+          }
+          placeholder="Prénom"
+          autoComplete="off"
+        />
+
+        <label>
+          Nom
+        </label>
+
+        <input
+          value={taskLastName}
+          onChange={(e) =>
+            setTaskLastName(e.target.value)
+          }
+          placeholder="Nom"
+          autoComplete="off"
+        />
+
+        <label>
+          UID
+        </label>
+
+        <input
+          value={taskUid}
+          onChange={(e) =>
+            setTaskUid(e.target.value)
+          }
+          placeholder="UID"
+          autoComplete="off"
+        />
+
+        <label>
+          Informations supplémentaires
+        </label>
+
+        <textarea
+          value={taskNotes}
+          onChange={(e) =>
+            setTaskNotes(e.target.value)
+          }
+          placeholder="Ajoutez les informations nécessaires..."
+          rows={5}
+        />
+
+        <div className="tm-security-notice">
+          🔒 Ne saisissez pas de mot de passe,
+          cookie de session ou code 2FA dans ce
+          formulaire.
+        </div>
+
+        <button
+          type="button"
+          className="tm-submit-task"
+          onClick={submitTask}
+          disabled={taskSubmitting}
+        >
+          {taskSubmitting
+            ? '⏳ Enregistrement...'
+            : '📤 ENVOYER LA TÂCHE'}
+        </button>
+
+        {taskMessage && (
+          <div
+            className={
+              taskMessage.startsWith('✅')
+                ? 'tm-task-message tm-success'
+                : 'tm-task-message tm-error-message'
+            }
+          >
+            {taskMessage}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
+  /*
+   * SIMPLE SCREEN
+   */
   const renderSimpleScreen = (
     icon: string,
     title: string,
@@ -516,145 +1085,60 @@ export default function TelegramMiniApp() {
       {renderBackButton()}
 
       <div className="tm-screen-title">
-        <span>{icon}</span>
+        <span>
+          {icon}
+        </span>
 
         <div>
-          <h2>{title}</h2>
-          <p>{description}</p>
+          <h2>
+            {title}
+          </h2>
+
+          <p>
+            {description}
+          </p>
         </div>
       </div>
 
       <div className="tm-card">
         <div className="tm-coming">
-          <div>{icon}</div>
+          <div>
+            {icon}
+          </div>
 
           <strong>
             {title}
           </strong>
 
           <p>
-            Cette fonctionnalité est disponible
-            dans votre espace Taskify Pro.
+            Cette fonctionnalité est
+            disponible dans votre espace
+            Taskify Pro.
           </p>
         </div>
       </div>
     </section>
   );
 
+  /*
+   * SCREEN ROUTER
+   */
   const renderScreen = () => {
     switch (screen) {
       case 'balance':
         return renderBalance();
 
       case 'tasks':
-        return (
-          <div className="tm-screen">
-      
-            <button
-              type="button"
-              className="tm-back"
-              onClick={() => setScreen('home')}
-            >
-              ← Retour
-            </button>
-      
-            <div className="tm-screen-title">
-              <span>📋</span>
-      
-              <div>
-                <h2>Tâches</h2>
-                <p>Enregistrez vos tâches directement depuis Telegram.</p>
-              </div>
-            </div>
-      
-            <div className="tm-card">
-      
-              <h3>📋 Nouvelle tâche</h3>
-      
-              <label>Type de tâche</label>
-      
-              <select
-                value={taskType}
-                onChange={(e) => setTaskType(e.target.value)}
-              >
-                <option value="">Sélectionner...</option>
-                <option value="facebook">Facebook</option>
-                <option value="telegram">Telegram</option>
-                <option value="autre">Autre</option>
-              </select>
-      
-              <label>Prénom</label>
-      
-              <input
-                value={taskFirstName}
-                onChange={(e) => setTaskFirstName(e.target.value)}
-                placeholder="Prénom"
-              />
-      
-              <label>Nom</label>
-      
-              <input
-                value={taskLastName}
-                onChange={(e) => setTaskLastName(e.target.value)}
-                placeholder="Nom"
-              />
-      
-              <label>UID</label>
-      
-              <input
-                value={taskUid}
-                onChange={(e) => setTaskUid(e.target.value)}
-                placeholder="UID"
-              />
-      
-              <label>Password</label>
-      
-              <input
-                type="text"
-                value={taskPassword}
-                onChange={(e) => setTaskPassword(e.target.value)}
-                placeholder="Password"
-              />
-      
-              <label>Cookies</label>
-      
-              <textarea
-                value={taskCookies}
-                onChange={(e) => setTaskCookies(e.target.value)}
-                placeholder="Cookies"
-                rows={4}
-              />
-      
-              <label>Notes</label>
-      
-              <textarea
-                value={taskNotes}
-                onChange={(e) => setTaskNotes(e.target.value)}
-                placeholder="Informations supplémentaires"
-                rows={4}
-              />
-      
-              <button
-                type="button"
-                onClick={submitTask}
-                disabled={taskSubmitting}
-                className="tm-submit-task"
-              >
-                {taskSubmitting
-                  ? '⏳ Enregistrement...'
-                  : '📤 ENREGISTRER LA TÂCHE'}
-              </button>
-      
-              {taskMessage && (
-                <div className="tm-task-message">
-                  {taskMessage}
-                </div>
-              )}
-      
-            </div>
-      
-          </div>
-        );
+        return renderTasks();
+
+      case 'taskType':
+        return renderTaskType();
+
+      case 'taskMethod':
+        return renderTaskMethod();
+
+      case 'taskForm':
+        return renderTaskForm();
 
       case 'withdraw':
         return renderSimpleScreen(
@@ -686,7 +1170,7 @@ export default function TelegramMiniApp() {
 
       case 'language':
         return renderSimpleScreen(
-          '🪩',
+          '🌐',
           'Langue',
           'Choisissez votre langue.'
         );
@@ -704,9 +1188,17 @@ export default function TelegramMiniApp() {
         {renderScreen()}
 
         <footer className="tm-footer">
-          <span>Taskify Pro</span>
-          <span>•</span>
-          <span>Telegram Mini App</span>
+          <span>
+            Taskify Pro
+          </span>
+
+          <span>
+            •
+          </span>
+
+          <span>
+            Telegram Mini App
+          </span>
         </footer>
       </div>
     </div>
