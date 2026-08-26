@@ -923,3 +923,58 @@
     grid-template-columns: 1fr;
   }
 }
+
+.tm-card label {
+  display: block;
+  margin: 12px 0 6px;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tm-card input,
+.tm-card select,
+.tm-card textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #f8fafc;
+  outline: none;
+  font-size: 12px;
+}
+
+.tm-card input:focus,
+.tm-card select:focus,
+.tm-card textarea:focus {
+  border-color: #3b82f6;
+}
+
+.tm-submit-task {
+  width: 100%;
+  margin-top: 18px;
+  padding: 13px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: white;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tm-submit-task:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+.tm-task-message {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #1e293b;
+  color: #e2e8f0;
+  text-align: center;
+  font-size: 12px;
+}
