@@ -73,8 +73,7 @@ export default function TelegramMiniApp() {
   const [taskNotes, setTaskNotes] = useState('');
   const [taskSubmitting, setTaskSubmitting] = useState(false);
   const [taskMessage, setTaskMessage] = useState('');
-  const [taskSubmitting, setTaskSubmitting] = useState(false);
-  const [taskMessage, setTaskMessage] = useState('');
+  
   
   useEffect(() => {
     webApp?.ready();
