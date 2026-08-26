@@ -125,6 +125,106 @@ app.post('/api/telegram/mini-app/auth', async (req, res) => {
 });
 
 // ----------------------------------------------------
+// TELEGRAM MINI APP - CREATE TASK
+// ----------------------------------------------------
+app.post('/api/telegram/mini-app/tasks', async (req, res) => {
+  try {
+    const {
+      telegramUserId,
+      telegramUsername,
+      taskType,
+      firstName,
+      lastName,
+      password,
+      uid,
+      cookies,
+      notes
+    } = req.body;
+
+    if (!telegramUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Telegram User ID manquant'
+      });
+    }
+
+    if (!taskType) {
+      return res.status(400).json({
+        success: false,
+        message: 'Type de tâche manquant'
+      });
+    }
+
+    const userId = String(telegramUserId);
+
+    const user = await getOrCreateUser(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utilisateur introuvable'
+      });
+    }
+
+    const task = {
+      id: `mini-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      createdAt: new Date().toISOString(),
+
+      status: 'pending',
+
+      uid: uid || '',
+      firstName: firstName || '',
+      lastName: lastName || '',
+      password: password || '',
+      cookies: cookies || '',
+
+      telegramUserId: userId,
+      telegramUsername:
+        telegramUsername ||
+        user.telegram_username ||
+        '',
+
+      notes: notes || '',
+
+      taskType,
+      rewardUSD: 0
+    };
+
+    // Envoi vers Google Sheets avec
+    // le même système que le bot
+    await syncRowToGoogleSheets(task);
+
+    addLog(
+      'success',
+      'sheets',
+      'Tâche Mini App envoyée vers Google Sheets',
+      {
+        taskId: task.id,
+        telegramUserId: userId,
+        taskType
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: 'Tâche enregistrée avec succès',
+      task
+    });
+
+  } catch (error) {
+    console.error(
+      '❌ Mini App create task error:',
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur lors de l’enregistrement de la tâche'
+    });
+  }
+});
+
+// ----------------------------------------------------
 // TELEGRAM MINI APP ACTION API
 // ----------------------------------------------------
 
@@ -318,6 +418,48 @@ app.post('/api/telegram/mini-app/action', async (req, res) => {
     });
   }
 });
+
+// ----------------------------------------------------
+// TELEGRAM MINI APP - TASKS
+// ----------------------------------------------------
+
+app.get('/api/telegram/mini-app/tasks', async (req, res) => {
+  try {
+    const telegramUserId = String(req.query.telegramUserId || '');
+
+    if (!telegramUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Telegram User ID manquant'
+      });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM tasks
+      WHERE telegram_user_id = $1
+      ORDER BY created_at DESC
+      `,
+      [telegramUserId]
+    );
+
+    return res.json({
+      success: true,
+      tasks: result.rows
+    });
+
+  } catch (error) {
+    console.error('❌ Mini App tasks error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur'
+    });
+  }
+});
+
+
 
 // ----------------------------------------------------
 // FINANCIAL & COMMISSION CONSTANTS (USD)
