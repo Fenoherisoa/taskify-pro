@@ -1471,15 +1471,47 @@ app.get('/api/settings', (req, res) => {
 });
 
 app.post('/api/settings', (req, res) => {
-  const {customPassword, googleSheetWebhookUrl, googleSheetFields, platformName, welcomeMessage, botToken} = req.body;
-  if (customPassword !== undefined) botSettings.customPassword = customPassword;
-  if (googleSheetWebhookUrl !== undefined) botSettings.googleSheetWebhookUrl = googleSheetWebhookUrl;
-  if (Array.isArray(googleSheetFields) && googleSheetFields.length > 0) {botSettings.googleSheetFields = googleSheetFields;}
-  if (platformName !== undefined) botSettings.platformName = platformName;
-  if (welcomeMessage !== undefined) botSettings.welcomeMessage = welcomeMessage;
-  if (botToken !== undefined) botSettings.botToken = botToken;
+  const {
+    customPassword,
+    googleSheetWebhookUrl,
+    googleSheetFields,
+    platformName,
+    welcomeMessage,
+    botToken
+  } = req.body;
 
-  addLog('info', 'system', `Paramètres mis à jour (Mot de passe dynamique: ${botSettings.customPassword})`);
+  if (customPassword !== undefined) {
+    botSettings.customPassword = customPassword;
+  }
+
+  if (googleSheetWebhookUrl !== undefined) {
+    botSettings.googleSheetWebhookUrl = googleSheetWebhookUrl;
+  }
+
+  // IMPORTANT:
+  // Avela ho voatahiry na dia [] aza.
+  if (Array.isArray(googleSheetFields)) {
+    botSettings.googleSheetFields = googleSheetFields;
+  }
+
+  if (platformName !== undefined) {
+    botSettings.platformName = platformName;
+  }
+
+  if (welcomeMessage !== undefined) {
+    botSettings.welcomeMessage = welcomeMessage;
+  }
+
+  if (botToken !== undefined) {
+    botSettings.botToken = botToken;
+  }
+
+  addLog(
+    'info',
+    'system',
+    `Paramètres mis à jour (Mot de passe dynamique: ${botSettings.customPassword})`
+  );
+
   res.json(botSettings);
 });
 

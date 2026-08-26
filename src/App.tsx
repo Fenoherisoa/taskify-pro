@@ -31,6 +31,16 @@ export default function App() {
     botToken: '',
     customPassword: 'TaskPassword@2025!',
     googleSheetWebhookUrl: '',
+    googleSheetFields: [
+      'timestamp',
+      'id',
+      'status',
+      'uid',
+      'firstName',
+      'lastName',
+      'telegramUserId',
+      'telegramUsername'
+    ],
     platformName: 'Task By RFC Office',
     isBotActive: false,
     mode: 'polling',
