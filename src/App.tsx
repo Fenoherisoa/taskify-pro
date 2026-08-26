@@ -159,23 +159,61 @@ export default function App() {
     return (
       <TelegramMiniApp
         onAction={(action) => {
-          console.log('Telegram Mini App action:', action);
-
-          const routes: Record<string, string> = {
-            balance: '/?telegramAction=balance',
-            tasks: '/?telegramAction=tasks',
-            withdraw: '/?telegramAction=withdraw',
-            support: '/?telegramAction=support',
-            referrals: '/?telegramAction=referrals',
-            leaderboard: '/?telegramAction=leaderboard',
-            language: '/?telegramAction=language'
+          const actionMap: Record<string, string> = {
+            balance: 'action_check_balance',
+            tasks: 'task_facebook',
+            withdraw: 'action_request_withdrawal',
+            support: 'action_support',
+            referrals: 'action_referrals',
+            leaderboard: 'action_leaderboard',
+            language: 'action_language'
           };
 
-          const target = routes[action];
+          const telegramAction = actionMap[action];
 
-          if (target) {
-            window.location.href = target;
+          if (!telegramAction) {
+            console.warn('Action Telegram inconnue:', action);
+            return;
           }
+
+          // Alefa amin'ny bot backend ilay action
+          fetch('/api/telegram/mini-app/action', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              action: telegramAction,
+              telegramUserId:
+                window.Telegram?.WebApp?.initDataUnsafe?.user?.id
+                  ? String(
+                      window.Telegram.WebApp.initDataUnsafe.user.id
+                    )
+                  : null
+            })
+          })
+            .then(async (response) => {
+              if (!response.ok) {
+                throw new Error(
+                  `Mini App action failed: ${response.status}`
+                );
+              }
+
+              return response.json();
+            })
+            .then((result) => {
+              console.log('Mini App action:', result);
+
+              if (result.redirect) {
+                window.location.href = result.redirect;
+              }
+            })
+            .catch((error) => {
+              console.error(
+                '❌ Erreur Mini App action:',
+                error
+              );
+            });
         }}
       />
     );

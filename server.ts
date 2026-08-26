@@ -16,6 +16,201 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ----------------------------------------------------
+// TELEGRAM MINI APP ACTION API
+// ----------------------------------------------------
+
+app.post('/api/telegram/mini-app/action', async (req, res) => {
+  try {
+    const { action, telegramUserId } = req.body;
+
+    if (!telegramUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Telegram User ID manquant'
+      });
+    }
+
+    const userId = String(telegramUserId);
+
+    // Vérifier / créer l'utilisateur PostgreSQL
+    const user = await getOrCreateUser(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utilisateur introuvable'
+      });
+    }
+
+    switch (action) {
+
+      // -----------------------------------------------
+      // SOLDE
+      // -----------------------------------------------
+      case 'action_check_balance': {
+        const wallet = await getUserWallet(userId);
+
+        const completedResult = await pool.query(
+          `
+          SELECT COUNT(*)::int AS count
+          FROM tasks
+          WHERE telegram_user_id = $1
+            AND status IN (
+              'completed',
+              'validated',
+              'approved',
+              'compte créé'
+            )
+          `,
+          [userId]
+        );
+
+        const pendingResult = await pool.query(
+          `
+          SELECT COUNT(*)::int AS count
+          FROM tasks
+          WHERE telegram_user_id = $1
+            AND status IN (
+              'pending',
+              'pending_validation',
+              'en_attente',
+              'awaiting_validation'
+            )
+          `,
+          [userId]
+        );
+
+        const rejectedResult = await pool.query(
+          `
+          SELECT COUNT(*)::int AS count
+          FROM tasks
+          WHERE telegram_user_id = $1
+            AND status IN (
+              'rejected_admin',
+              'refused_admin',
+              'rejected',
+              'rejected_bot',
+              'refused_bot'
+            )
+          `,
+          [userId]
+        );
+
+        return res.json({
+          success: true,
+          action,
+          user: {
+            id: user.telegram_user_id,
+            username: user.telegram_username,
+            firstName: user.first_name,
+            lastName: user.last_name
+          },
+          wallet: {
+            balance: Number(wallet?.balance || 0),
+            totalEarned: Number(wallet?.total_earned || 0),
+            totalWithdrawn: Number(wallet?.total_withdrawn || 0)
+          },
+          statistics: {
+            completed: Number(
+              completedResult.rows[0]?.count || 0
+            ),
+            pending: Number(
+              pendingResult.rows[0]?.count || 0
+            ),
+            rejected: Number(
+              rejectedResult.rows[0]?.count || 0
+            )
+          }
+        });
+      }
+
+      // -----------------------------------------------
+      // TÂCHES
+      // -----------------------------------------------
+      case 'task_facebook': {
+        return res.json({
+          success: true,
+          action,
+          redirect: '/?telegramMiniApp=1&screen=tasks'
+        });
+      }
+
+      // -----------------------------------------------
+      // RETRAIT
+      // -----------------------------------------------
+      case 'action_request_withdrawal': {
+        return res.json({
+          success: true,
+          action,
+          redirect: '/?telegramMiniApp=1&screen=withdraw'
+        });
+      }
+
+      // -----------------------------------------------
+      // SUPPORT
+      // -----------------------------------------------
+      case 'action_support': {
+        return res.json({
+          success: true,
+          action,
+          redirect: '/?telegramMiniApp=1&screen=support'
+        });
+      }
+
+      // -----------------------------------------------
+      // PARRAINAGES
+      // -----------------------------------------------
+      case 'action_referrals': {
+        return res.json({
+          success: true,
+          action,
+          redirect: '/?telegramMiniApp=1&screen=referrals'
+        });
+      }
+
+      // -----------------------------------------------
+      // CLASSEMENT
+      // -----------------------------------------------
+      case 'action_leaderboard': {
+        return res.json({
+          success: true,
+          action,
+          redirect: '/?telegramMiniApp=1&screen=leaderboard'
+        });
+      }
+
+      // -----------------------------------------------
+      // LANGUE
+      // -----------------------------------------------
+      case 'action_language': {
+        return res.json({
+          success: true,
+          action,
+          redirect: '/?telegramMiniApp=1&screen=language'
+        });
+      }
+
+      default:
+        return res.status(400).json({
+          success: false,
+          message: `Action inconnue: ${action}`
+        });
+    }
+
+  } catch (error) {
+    console.error(
+      '❌ Telegram Mini App action error:',
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur'
+    });
+  }
+});
+
+// ----------------------------------------------------
 // FINANCIAL & COMMISSION CONSTANTS (USD)
 // ----------------------------------------------------
 const TASK_REWARD_USD = 0.04;                  // $0.04 per completed task
