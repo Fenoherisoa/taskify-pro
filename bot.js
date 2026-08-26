@@ -21,6 +21,30 @@
 
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
+
+const WORKER_WEB_APP_URL = 'https://taskify-pro-bf2q.onrender.com';
+
+const WORKER_MAIN_KEYBOARD = Markup.keyboard([
+  [
+    Markup.button.webApp('🚀 Open Dashboard', WORKER_WEB_APP_URL)
+  ],
+  [
+    '💰 Solde',
+    '📋 Tâches'
+  ],
+  [
+    '🏦 Retrait',
+    '📞 Support'
+  ],
+  [
+    '👥 Parrainages',
+    '🏆 Classement'
+  ],
+  [
+    '🪩 Langue'
+  ]
+]).resize();
+
 const https = require('https');
 const http = require('http');
 
@@ -253,7 +277,7 @@ bot.start(async (ctx) => {
 
   await ctx.reply(t.welcome, {
     parse_mode: 'Markdown',
-    ...MAIN_REPLY_KEYBOARD
+    WORKER_MAIN_KEYBOARD
   });
 });
 

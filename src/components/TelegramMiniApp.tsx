@@ -58,14 +58,63 @@ export default function TelegramMiniApp() {
   const [data, setData] = useState<MiniAppData | null>(null);
 
   const webApp = window.Telegram?.WebApp;
+  const telegramInitData = webApp?.initData || '';
+  const telegramUser = webApp?.initDataUnsafe?.user;
   const user = webApp?.initDataUnsafe?.user;
 
   const userId = user?.id ? String(user.id) : '';
   const firstName = user?.first_name || 'Utilisateur';
-
+  
   useEffect(() => {
     webApp?.ready();
     webApp?.expand();
+  }, [webApp]);
+
+  useEffect(() => {
+    if (!webApp?.initData) return;
+
+    console.log('Telegram WebApp authenticated:', {
+      initData: webApp.initData,
+      user: webApp.initDataUnsafe?.user
+    });
+  }, [webApp]);
+
+  useEffect(() => {
+    const authenticateTelegramWorker = async () => {
+      if (!webApp?.initData) {
+        console.warn('Telegram initData tsy misy');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/telegram/mini-app/auth', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            initData: webApp.initData,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          console.error('Telegram authentication failed:', data);
+          return;
+        }
+
+        console.log('✅ Telegram Worker authenticated:', data.user);
+
+      } catch (error) {
+        console.error(
+          '❌ Telegram Mini App authentication error:',
+          error
+        );
+      }
+    };
+  
+    authenticateTelegramWorker();
   }, [webApp]);
 
   const haptic = () => {

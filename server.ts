@@ -8,12 +8,121 @@ import {
   getOrCreateUser,
   getUserWallet
 } from './src/services/userService';
+import crypto from 'crypto';
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ----------------------------------------------------
+// TELEGRAM MINI APP AUTH
+// ----------------------------------------------------
+app.post('/api/telegram/mini-app/auth', async (req, res) => {
+  try {
+    const { initData } = req.body;
+
+    if (!initData) {
+      return res.status(400).json({
+        success: false,
+        message: 'Telegram initData manquant'
+      });
+    }
+
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+
+    if (!botToken) {
+      return res.status(500).json({
+        success: false,
+        message: 'TELEGRAM_BOT_TOKEN manquant'
+      });
+    }
+
+    const params = new URLSearchParams(initData);
+    const hash = params.get('hash');
+
+    if (!hash) {
+      return res.status(401).json({
+        success: false,
+        message: 'Telegram hash manquant'
+      });
+    }
+
+    params.delete('hash');
+
+    const dataCheckString = [...params.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
+
+    const secretKey = crypto
+      .createHmac('sha256', 'WebAppData')
+      .update(botToken)
+      .digest();
+
+    const calculatedHash = crypto
+      .createHmac('sha256', secretKey)
+      .update(dataCheckString)
+      .digest('hex');
+
+    if (
+      calculatedHash.length !== hash.length ||
+      !crypto.timingSafeEqual(
+        Buffer.from(calculatedHash),
+        Buffer.from(hash)
+      )
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: 'Telegram initData invalide'
+      });
+    }
+
+    const telegramUserData = params.get('user');
+
+    if (!telegramUserData) {
+      return res.status(401).json({
+        success: false,
+        message: 'Utilisateur Telegram introuvable'
+      });
+    }
+
+    const telegramUser = JSON.parse(telegramUserData);
+    const userId = String(telegramUser.id);
+
+    const user = await getOrCreateUser(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utilisateur introuvable'
+      });
+    }
+
+    return res.json({
+      success: true,
+      authenticated: true,
+      user: {
+        id: user.telegram_user_id,
+        username: user.telegram_username,
+        firstName: user.first_name,
+        lastName: user.last_name
+      }
+    });
+
+  } catch (error) {
+    console.error(
+      '❌ Telegram Mini App auth error:',
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur authentification Telegram'
+    });
+  }
+});
 
 // ----------------------------------------------------
 // TELEGRAM MINI APP ACTION API
@@ -1298,11 +1407,11 @@ function setupTelegrafHandlers(bot: Telegraf) {
 
     await renderScreen(
       ctx,
-      `⚠️ *Informations du compte Facebook*\n\n` +
+      `⚠️ *Informations du compte Facebook* 🔵 f\n\n` +
       `✅ Prénom : \`${firstName}\`\n` +
       `✅ Nom : \`${lastName}\`\n` +
       `🔑 MDP: \`${currentPassword}\`\n` +
-      `💵 Gain : \`$${TASK_REWARD_USD.toFixed(2)} USD\`\n\n` +
+      
       `🔻 Une fois le compte créé, envoyez votre UID :`,
       Markup.inlineKeyboard([
         [Markup.button.callback(t.btn_send_uid, 'action_send_uid')],
