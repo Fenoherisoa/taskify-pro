@@ -362,12 +362,22 @@ function getT(lang?: string) {
 // ----------------------------------------------------
 let activeTelegrafBot: Telegraf | null = null;
 
-// Persistent Reply Keyboard (Menu Principal)
 const MAIN_REPLY_KEYBOARD = Markup.keyboard([
-  ['💰 Solde / Balance', '📋 Tâches / Tasks'],
-  ['🏦 Retrait / Withdraw', '📞 Support'],
-  ['👥 Parrainages / Referrals', '🏆 Classement / Top'],
-  ['🪩 Langue / Language']
+  [
+    Markup.button.text('💰 Solde / Balance', 'primary'),
+    Markup.button.text('📋 Tâches / Tasks', 'danger')
+  ],
+  [
+    Markup.button.text('🏦 Retrait / Withdraw', 'success'),
+    Markup.button.text('📞 Support', 'primary')
+  ],
+  [
+    Markup.button.text('👥 Parrainages / Referrals', 'primary'),
+    Markup.button.text('🏆 Classement / Top', 'primary')
+  ],
+  [
+    Markup.button.text('🪩 Langue / Language', 'primary')
+  ]
 ]).resize();
 
 function setupTelegrafHandlers(bot: Telegraf) {
@@ -454,36 +464,137 @@ function setupTelegrafHandlers(bot: Telegraf) {
   const handleBalance = async (ctx: any) => {
     const userFirstName = ctx.from?.first_name || 'Utilisateur';
     const userId = String(ctx.from?.id || 'unknown');
+
     if (!userSessions[userId]) {
-      userSessions[userId] = { step: 'START', language: 'fr', balance: 0, tasksCompleted: 0, referralsCount: 0, referralEarnings: 0 };
+      userSessions[userId] = {
+        step: 'START',
+        language: 'fr',
+        balance: 0,
+        tasksCompleted: 0,
+        referralsCount: 0,
+        referralEarnings: 0
+      };
     }
+
     const session = userSessions[userId];
     const t = getT(session.language);
 
+    // PostgreSQL = source officielle du solde
     const wallet = await getUserWallet(userId);
-    const balance = wallet ? wallet.balance : 0;
-    const tasksCompleted = session.tasksCompleted || 0;
-    const referralsCount = session.referralsCount || 0;
-    const referralEarnings = session.referralEarnings || 0;
+    const balance = wallet ? Number(wallet.balance) : 0;
+
+    const completedResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS count
+      FROM tasks
+      WHERE telegram_user_id = $1
+        AND status IN ('completed', 'validated', 'approved', 'compte créé')
+      `,
+      [userId]
+    );
+
+    const pendingResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS count
+      FROM tasks
+      WHERE telegram_user_id = $1
+        AND status IN (
+          'pending',
+          'pending_validation',
+          'en_attente',
+          'awaiting_validation'
+        )
+      `,
+      [userId]
+    );
+
+    const rejectedAdminResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS count
+      FROM tasks
+      WHERE telegram_user_id = $1
+        AND status IN (
+          'rejected_admin',
+          'refused_admin',
+          'rejected'
+        )
+      `,
+      [userId]
+    );
+
+    const rejectedBotResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS count
+      FROM tasks
+      WHERE telegram_user_id = $1
+        AND status IN (
+          'rejected_bot',
+          'refused_bot'
+        )
+      `,
+      [userId]
+    );
+
+    const tasksValidated = Number(
+      completedResult.rows[0]?.count || 0
+    );
+
+    const tasksPending = Number(
+      pendingResult.rows[0]?.count || 0
+    );
+
+    const tasksRejectedAdmin = Number(
+      rejectedAdminResult.rows[0]?.count || 0
+    );
+
+    const tasksRejectedBot = Number(
+      rejectedBotResult.rows[0]?.count || 0
+    );
+
+    const referralEarnings = Number(
+      session.referralEarnings || 0
+    );
 
     await ctx.reply(
       `${t.balance_title}\n\n` +
+
       `👤 Utilisateur : *${userFirstName}*\n` +
       `🆔 ID Compte : \`${userId}\`\n` +
-      `🛡️ Statut : *Vérifié* ✅\n` +
-      `━━━━━━━━━━━━━━━━━━\n` +
-      `💵 *Solde validé disponible :* \`$${balance.toFixed(3)}\`\n` +
-      `⏳ *En cours de validation :* \`$0.000\`\n` +
-      `📊 *Tâches validées :* \`${tasksCompleted}\` (\`$${(tasksCompleted * TASK_REWARD_USD).toFixed(3)}\`)\n` +
-      `👥 *Filleuls actifs :* \`${referralsCount}\` (\`+$${referralEarnings.toFixed(3)}\`)\n` +
-      `━━━━━━━━━━━━━━━━━━\n` +
+      `🛡️ Statut : *Vérifié* ✅\n\n` +
+
+      `━━━━━━━━━━━━━━━━━━\n\n` +
+
+      `💰 *Solde disponible :* \`$${balance.toFixed(3)}\`\n` +
+      `🎉 *Gains de parrainage :* \`$${referralEarnings.toFixed(3)}\`\n\n` +
+
+      `━━━━━━━━━━━━━━━━━━\n\n` +
+
+      `🔻 *Tâches validées :* \`${tasksValidated}\`\n` +
+      `⏳ *En attente de vérification :* \`${tasksPending}\`\n` +
+      `⚠️ *Refusées par l'administrateur :* \`${tasksRejectedAdmin}\`\n` +
+      `⚠️ *Refusées par le bot :* \`${tasksRejectedBot}\`\n\n` +
+
+      `━━━━━━━━━━━━━━━━━━\n\n` +
+
       `_Rémunération standard : $${TASK_REWARD_USD.toFixed(2)} par compte Facebook validé._`,
       {
         parse_mode: 'Markdown',
+
         ...MAIN_REPLY_KEYBOARD,
+
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('📋 ' + t.btn_tasks, 'task_facebook')],
-          [Markup.button.callback('🏦 ' + t.btn_withdraw, 'action_request_withdrawal')]
+          [
+            Markup.button.callback(
+              '📋 Effectuer une Tâche',
+              'task_facebook'
+            )
+          ],
+          [
+            Markup.button.callback(
+              '🏦 Demander un Retrait',
+              'action_request_withdrawal'
+            )
+          ]
         ])
       }
     );
@@ -492,32 +603,78 @@ function setupTelegrafHandlers(bot: Telegraf) {
   // Helper: Handle 📋 Tâches
   const handleTasks = async (ctx: any) => {
     const userId = String(ctx.from?.id || 'unknown');
+    const userFirstName = ctx.from?.first_name || 'Utilisateur';
+
     if (!userSessions[userId]) {
-      userSessions[userId] = { step: 'AUTH_CHOICE', taskType: 'Facebook', language: 'fr' };
+      userSessions[userId] = {
+        step: 'AUTH_CHOICE',
+        taskType: 'Facebook',
+        language: 'fr',
+        balance: 0,
+        tasksCompleted: 0,
+        referralsCount: 0,
+        referralEarnings: 0
+      };
     } else {
       userSessions[userId].step = 'AUTH_CHOICE';
       userSessions[userId].taskType = 'Facebook';
     }
-    const t = getT(userSessions[userId]?.language);
+
+    const session = userSessions[userId];
+    const t = getT(session.language);
 
     await ctx.reply(
       `${t.tasks_title}\n\n` +
+
+      `👤 Utilisateur : *${userFirstName}*\n` +
+      `🆔 ID Compte : \`${userId}\`\n` +
+      `🛡️ Statut : *Vérifié* ✅\n\n` +
+
+      `━━━━━━━━━━━━━━━━━━\n\n` +
+
       `💵 *Rémunération par compte validé :* \`$${TASK_REWARD_USD.toFixed(2)}\`\n` +
-      `🎁 *Commission parrainage reçue :* \`${REFERRAL_COMMISSION_PERCENT}%\` (\`$${REFERRAL_TASK_COMMISSION_USD.toFixed(3)}\` / tâche filleul)\n\n` +
-      `Choisissez votre méthode d'authentification pour cette tâche :\n\n` +
-      `• 🍪 *Cookies* : Recommandé pour validation et enregistrement immédiat.\n` +
-      `• 🔐 *2FA* : Authentification par clé sécurisée.\n\n` +
-      `_Sélectionnez votre option ci-dessous :_`,
+      `🎁 *Commission parrainage :* \`${REFERRAL_COMMISSION_PERCENT}%\`\n` +
+      `💰 *Commission par tâche :* \`$${REFERRAL_TASK_COMMISSION_USD.toFixed(3)}\`\n\n` +
+
+      `━━━━━━━━━━━━━━━━━━\n\n` +
+
+      `📋 *Choisissez votre méthode d'authentification :*\n\n` +
+
+      `🍪 *Cookies* — recommandé pour une validation rapide.\n` +
+      `🔐 *2FA* — authentification sécurisée.\n\n` +
+
+      `_Sélectionnez votre option ci-dessous._`,
+
       {
         parse_mode: 'Markdown',
+
+        // Menu permanent
         ...MAIN_REPLY_KEYBOARD,
+
+        // Boutons d'action
         ...Markup.inlineKeyboard([
           [
-            Markup.button.callback(t.btn_cookies, 'auth_cookies'),
-            Markup.button.callback(t.btn_2fa, 'auth_2fa')
+            Markup.button.callback(
+              '🍪 Cookies',
+              'auth_cookies'
+            ),
+            Markup.button.callback(
+              '🔐 2FA',
+              'auth_2fa'
+            )
           ],
-          [Markup.button.callback(t.btn_rules, 'action_task_rules')],
-          [Markup.button.callback(t.btn_cancel, 'action_cancel')]
+          [
+            Markup.button.callback(
+              '📜 Règles',
+              'action_task_rules'
+            )
+          ],
+          [
+            Markup.button.callback(
+              '❌ Annuler',
+              'action_cancel'
+            )
+          ]
         ])
       }
     );
