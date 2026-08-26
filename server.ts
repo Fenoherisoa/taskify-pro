@@ -395,8 +395,9 @@ function setupTelegrafHandlers(bot: Telegraf) {
 
   // /start command
   bot.start(async (ctx) => {
+
     const userId = String(ctx.from?.id || 'unknown');
-    const userFirstName = ctx.from?.first_name || 'utilisateur';
+
     if (!userSessions[userId]) {
       userSessions[userId] = {
         step: 'START',
@@ -412,17 +413,37 @@ function setupTelegrafHandlers(bot: Telegraf) {
 
     const t = getT(userSessions[userId]?.language);
 
+    // Menu principal permanent
     await ctx.reply(
       t.welcome,
       {
         parse_mode: 'Markdown',
-        ...MAIN_REPLY_KEYBOARD,
+        ...MAIN_REPLY_KEYBOARD
+      }
+    );
+
+    // Boutons inline supplémentaires
+    await ctx.reply(
+      '👇 *Actions rapides*',
+      {
+        parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')],
-          [Markup.button.callback('💰 ' + t.balance_title.split('*')[1] || 'Solde', 'action_check_balance')]
+          [
+            Markup.button.callback(
+              '🚀 ' + t.btn_tasks,
+              'task_facebook'
+            )
+          ],
+          [
+            Markup.button.callback(
+              '💰 Solde / Balance',
+              'action_check_balance'
+            )
+          ]
         ])
       }
     );
+
   });
 
   // ----------------------------------------------------
