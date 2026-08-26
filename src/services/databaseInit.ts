@@ -71,39 +71,5 @@ export async function initializeDatabase() {
     );
   `);
 
-  // -----------------------------------------------
-  // LOAD SAVED BOT SETTINGS
-  // -----------------------------------------------
-
-  const settingsResult = await pool.query(
-    `SELECT settings FROM bot_settings WHERE id = 1 LIMIT 1`
-  );
-
-  if (settingsResult.rows.length > 0) {
-    const savedSettings = settingsResult.rows[0].settings;
-
-    if (
-      savedSettings &&
-      typeof savedSettings === 'object'
-    ) {
-      Object.assign(botSettings, savedSettings);
-    }
-
-    console.log('✅ Bot settings loaded from PostgreSQL');
-  } else {
-    // Première installation :
-    // sauvegarder les settings actuels comme configuration initiale.
-
-    await pool.query(
-      `
-      INSERT INTO bot_settings (id, settings, updated_at)
-      VALUES (1, $1::jsonb, NOW())
-      `,
-      [JSON.stringify(botSettings)]
-    );
-
-    console.log('✅ Initial bot settings saved to PostgreSQL');
-  }
-
   console.log('✅ PostgreSQL tables initialized');
 }
