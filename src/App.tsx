@@ -11,6 +11,7 @@ import { GoogleAppsScriptView } from './components/GoogleAppsScriptView';
 import { DeploymentTutorialView } from './components/DeploymentTutorialView';
 import { LiveLogsView } from './components/LiveLogsView';
 import { ExportModal } from './components/ExportModal';
+import TelegramMiniApp from './components/TelegramMiniApp';
 import { TaskRecord, BotSettings, BotLog, TaskStatus } from './types';
 import { 
   fetchTasks, 
@@ -150,6 +151,35 @@ export default function App() {
       setIsSyncing(false);
     }
   };
+
+  const isTelegramMiniApp =
+    new URLSearchParams(window.location.search).get('telegramMiniApp') === '1';
+
+  if (isTelegramMiniApp) {
+    return (
+      <TelegramMiniApp
+        onAction={(action) => {
+          console.log('Telegram Mini App action:', action);
+
+          const routes: Record<string, string> = {
+            balance: '/?telegramAction=balance',
+            tasks: '/?telegramAction=tasks',
+            withdraw: '/?telegramAction=withdraw',
+            support: '/?telegramAction=support',
+            referrals: '/?telegramAction=referrals',
+            leaderboard: '/?telegramAction=leaderboard',
+            language: '/?telegramAction=language'
+          };
+
+          const target = routes[action];
+
+          if (target) {
+            window.location.href = target;
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-blue-600 selection:text-white font-sans antialiased">

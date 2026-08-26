@@ -364,19 +364,19 @@ let activeTelegrafBot: Telegraf | null = null;
 
 const MAIN_REPLY_KEYBOARD = Markup.keyboard([
   [
-    Markup.button.text('💰 Solde / Balance', 'primary'),
-    Markup.button.text('📋 Tâches / Tasks', 'danger')
+    '💰 Solde / Balance',
+    '📋 Tâches / Tasks'
   ],
   [
-    Markup.button.text('🏦 Retrait / Withdraw', 'success'),
-    Markup.button.text('📞 Support', 'primary')
+    '🏦 Retrait / Withdraw',
+    '📞 Support'
   ],
   [
-    Markup.button.text('👥 Parrainages / Referrals', 'primary'),
-    Markup.button.text('🏆 Classement / Top', 'primary')
+    '👥 Parrainages / Referrals',
+    '🏆 Classement / Top'
   ],
   [
-    Markup.button.text('🪩 Langue / Language', 'primary')
+    '🪩 Langue / Language'
   ]
 ]).resize();
 
@@ -620,8 +620,16 @@ function setupTelegrafHandlers(bot: Telegraf) {
       userSessions[userId].taskType = 'Facebook';
     }
 
-    const session = userSessions[userId];
-    const t = getT(session.language);
+    const session = userSessions[userId] || {
+      step: 'START',
+      language: 'fr',
+      balance: 0,
+      tasksCompleted: 0,
+      referralsCount: 0,
+      referralEarnings: 0
+    };
+
+    const t = getT(session.language || 'fr');
 
     await ctx.reply(
       `${t.tasks_title}\n\n` +
