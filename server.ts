@@ -1383,51 +1383,102 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// 2. Get all tasks
-app.get('/api/tasks', (req, res) => {
-  res.json(tasks);
-});
+app.get('/api/settings', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT settings FROM bot_settings WHERE id = 1 LIMIT 1`
+    );
 
-// 3. Create task manually / from simulator
-app.post('/api/tasks', async (req, res) => {
-  const { uid, cookies, firstName, lastName, password, telegramUserId, telegramUsername, notes, taskType } = req.body;
-  
-  if (!uid || !cookies) {
-    return res.status(400).json({ error: 'UID et Cookies obligatoires' });
-  }
+    if (result.rows.length > 0) {
+      const savedSettings = result.rows[0].settings;
 
-  const identity = (!firstName || !lastName) ? generateRandomName() : { firstName, lastName };
-
-  const newTask = {
-    id: `task-${Date.now()}`,
-    uid,
-    cookies,
-    firstName: identity.firstName,
-    lastName: identity.lastName,
-    password: password || botSettings.customPassword,
-    telegramUserId: telegramUserId || 'sim_dashboard',
-    telegramUsername: telegramUsername || 'dashboard_operator',
-    status: 'compte créé' as const,
-    notes: notes || `Créé via ${botSettings.platformName}`,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    syncedToGoogleSheets: false,
-    taskType: taskType || 'Facebook'
-  };
-
-  tasks.unshift(newTask);
-  addLog('success', 'system', `Nouvelle tâche enregistrée (UID: ${uid})`, newTask);
-
-  // Sync to Google Sheets if configured
-  if (botSettings.googleSheetWebhookUrl) {
-    syncRowToGoogleSheets(newTask).then(result => {
-      if (result.success) {
-        newTask.syncedToGoogleSheets = true;
+      if (savedSettings && typeof savedSettings === 'object') {
+        Object.assign(botSettings, savedSettings);
       }
+    }
+
+    res.json(botSettings);
+
+  } catch (error) {
+    console.error('❌ Failed to load bot settings:', error);
+
+    res.status(500).json({
+      status: 'error',
+      message: error instanceof Error
+        ? error.message
+        : String(error)
     });
   }
+});
 
-  res.status(201).json(newTask);
+app.post('/api/settings', async (req, res) => {
+  try {
+    const {
+      customPassword,
+      googleSheetWebhookUrl,
+      googleSheetFields,
+      platformName,
+      welcomeMessage,
+      botToken
+    } = req.body;
+
+    if (customPassword !== undefined) {
+      botSettings.customPassword = customPassword;
+    }
+
+    if (googleSheetWebhookUrl !== undefined) {
+      botSettings.googleSheetWebhookUrl = googleSheetWebhookUrl;
+    }
+
+    if (Array.isArray(googleSheetFields)) {
+      botSettings.googleSheetFields = googleSheetFields;
+    }
+
+    if (platformName !== undefined) {
+      botSettings.platformName = platformName;
+    }
+
+    if (welcomeMessage !== undefined) {
+      botSettings.welcomeMessage = welcomeMessage;
+    }
+
+    if (botToken !== undefined) {
+      botSettings.botToken = botToken;
+    }
+
+    await pool.query(
+      `
+      INSERT INTO bot_settings (id, settings, updated_at)
+      VALUES (1, $1::jsonb, NOW())
+      ON CONFLICT (id)
+      DO UPDATE SET
+        settings = EXCLUDED.settings,
+        updated_at = NOW()
+      `,
+      [JSON.stringify(botSettings)]
+    );
+
+    addLog(
+      'info',
+      'system',
+      'Paramètres sauvegardés dans PostgreSQL'
+    );
+
+    res.json({
+      status: 'success',
+      settings: botSettings
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to save bot settings:', error);
+
+    res.status(500).json({
+      status: 'error',
+      message: error instanceof Error
+        ? error.message
+        : String(error)
+    });
+  }
 });
 
 // 4. Update task
