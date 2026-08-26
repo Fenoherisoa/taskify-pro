@@ -264,6 +264,97 @@
   box-shadow: 0 10px 30px rgba(245, 158, 11, .30);
 }
 
+/* =====================================================
+   EXTRA TELEGRAM BUTTONS
+   ===================================================== */
+
+/* Back button */
+.tm-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+
+  padding: 9px 14px;
+
+  border: 1px solid #38bdf8;
+  border-radius: 12px;
+
+  color: #ffffff;
+
+  background: linear-gradient(
+    135deg,
+    #0ea5e9,
+    #0369a1
+  );
+
+  box-shadow: 0 7px 20px rgba(14, 165, 233, .25);
+
+  font-size: 12px;
+  font-weight: 800;
+
+  cursor: pointer;
+
+  transition:
+    transform .18s ease,
+    filter .18s ease,
+    box-shadow .18s ease;
+}
+
+.tm-back:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.12);
+  box-shadow: 0 10px 25px rgba(14, 165, 233, .35);
+}
+
+.tm-back:active {
+  transform: scale(.96);
+}
+
+
+/* Retry button */
+.tm-retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-width: 120px;
+
+  padding: 10px 16px;
+
+  border: 1px solid #fbbf24;
+  border-radius: 11px;
+
+  color: #ffffff;
+
+  background: linear-gradient(
+    135deg,
+    #f59e0b,
+    #b45309
+  );
+
+  box-shadow: 0 7px 20px rgba(245, 158, 11, .25);
+
+  font-size: 12px;
+  font-weight: 800;
+
+  cursor: pointer;
+
+  transition:
+    transform .18s ease,
+    filter .18s ease,
+    box-shadow .18s ease;
+}
+
+.tm-retry:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+  box-shadow: 0 10px 25px rgba(245, 158, 11, .35);
+}
+
+.tm-retry:active {
+  transform: scale(.96);
+}
+
 /* Button contents */
 
 .tm-action-icon {
@@ -307,7 +398,9 @@
   opacity: .8;
 }
 
-/* Language */
+/* =====================================================
+   LANGUAGE BUTTON - DISTINCT COLOR
+   ===================================================== */
 
 .tm-language {
   grid-column: 1 / -1;
@@ -319,30 +412,61 @@
   min-height: 64px;
   padding: 13px 16px;
 
-  border: 1px solid #475569;
+  border: 1px solid #c084fc;
   border-radius: 17px;
 
-  color: white;
+  color: #ffffff;
+
   background: linear-gradient(
     135deg,
-    #334155,
-    #1e293b
+    #a855f7 0%,
+    #7e22ce 50%,
+    #581c87 100%
   );
+
+  box-shadow:
+    0 10px 30px rgba(168, 85, 247, .30),
+    inset 0 1px 0 rgba(255,255,255,.18);
 
   cursor: pointer;
 
   transition:
     transform .18s ease,
-    filter .18s ease;
+    filter .18s ease,
+    box-shadow .18s ease;
 }
 
 .tm-language:hover {
   transform: translateY(-2px);
-  filter: brightness(1.15);
+  filter: brightness(1.12);
+
+  box-shadow:
+    0 14px 35px rgba(168, 85, 247, .40),
+    inset 0 1px 0 rgba(255,255,255,.22);
+}
+
+.tm-language:active {
+  transform: scale(.97);
 }
 
 .tm-language > span {
-  font-size: 22px;
+  width: 42px;
+  height: 42px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  flex-shrink: 0;
+
+  border-radius: 13px;
+
+  background: rgba(255,255,255,.16);
+  border: 1px solid rgba(255,255,255,.25);
+
+  font-size: 21px;
+
+  backdrop-filter: blur(8px);
 }
 
 .tm-language div {
@@ -353,16 +477,31 @@
 
 .tm-language strong {
   font-size: 13px;
+  font-weight: 800;
 }
 
 .tm-language small {
   margin-top: 3px;
-  color: #94a3b8;
+  color: rgba(255,255,255,.75);
   font-size: 10px;
 }
 
 .tm-language b {
   margin-left: auto;
+
+  width: 30px;
+  height: 30px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 10px;
+
+  background: rgba(255,255,255,.14);
+  border: 1px solid rgba(255,255,255,.18);
+
+  font-size: 16px;
 }
 
 /* =====================================================
