@@ -65,12 +65,14 @@ export default function TelegramMiniApp() {
   const userId = user?.id ? String(user.id) : '';
   const firstName = user?.first_name || 'Utilisateur';
   const [taskType, setTaskType] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [password, setPassword] = useState('');
-  const [uid, setUid] = useState('');
-  const [cookies, setCookies] = useState('');
-  const [notes, setNotes] = useState('');
+  const [taskFirstName, setTaskFirstName] = useState('');
+  const [taskLastName, setTaskLastName] = useState('');
+  const [taskPassword, setTaskPassword] = useState('');
+  const [taskUid, setTaskUid] = useState('');
+  const [taskCookies, setTaskCookies] = useState('');
+  const [taskNotes, setTaskNotes] = useState('');
+  const [taskSubmitting, setTaskSubmitting] = useState(false);
+  const [taskMessage, setTaskMessage] = useState('');
   const [taskSubmitting, setTaskSubmitting] = useState(false);
   const [taskMessage, setTaskMessage] = useState('');
   
@@ -219,12 +221,12 @@ export default function TelegramMiniApp() {
           telegramUserId: telegramUser.id,
           telegramUsername: telegramUser.username || '',
           taskType,
-          firstName,
-          lastName,
-          password,
-          uid,
-          cookies,
-          notes,
+          firstName: taskFirstName,
+          lastName: taskLastName,
+          password: taskPassword,
+          uid: taskUid,
+          cookies: taskCookies,
+          notes: taskNotes,
         }),
       });
   
@@ -239,12 +241,12 @@ export default function TelegramMiniApp() {
       setTaskMessage('✅ Tâche enregistrée avec succès');
   
       setTaskType('');
-      setFirstName('');
-      setLastName('');
-      setPassword('');
-      setUid('');
-      setCookies('');
-      setNotes('');
+      setTaskFirstName('');
+      setTaskLastName('');
+      setTaskPassword('');
+      setTaskUid('');
+      setTaskCookies('');
+      setTaskNotes('');
   
     } catch (error) {
       console.error(error);
@@ -584,24 +586,24 @@ export default function TelegramMiniApp() {
               <label>Prénom</label>
       
               <input
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
+                value={taskFirstName}
+                onChange={(e) => setTaskFirstName(e.target.value)}
                 placeholder="Prénom"
               />
       
               <label>Nom</label>
       
               <input
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
+                value={taskLastName}
+                onChange={(e) => setTaskLastName(e.target.value)}
                 placeholder="Nom"
               />
       
               <label>UID</label>
       
               <input
-                value={uid}
-                onChange={(e) => setUid(e.target.value)}
+                value={taskUid}
+                onChange={(e) => setTaskUid(e.target.value)}
                 placeholder="UID"
               />
       
@@ -609,16 +611,16 @@ export default function TelegramMiniApp() {
       
               <input
                 type="text"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={taskPassword}
+                onChange={(e) => setTaskPassword(e.target.value)}
                 placeholder="Password"
               />
       
               <label>Cookies</label>
       
               <textarea
-                value={cookies}
-                onChange={(e) => setCookies(e.target.value)}
+                value={taskCookies}
+                onChange={(e) => setTaskCookies(e.target.value)}
                 placeholder="Cookies"
                 rows={4}
               />
@@ -626,8 +628,8 @@ export default function TelegramMiniApp() {
               <label>Notes</label>
       
               <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                value={taskNotes}
+                onChange={(e) => setTaskNotes(e.target.value)}
                 placeholder="Informations supplémentaires"
                 rows={4}
               />
