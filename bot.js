@@ -80,29 +80,29 @@ const FIRST_NAMES = [
 ];
 
 const LAST_NAMES = [
-  'Martin', 'Bernard', 'Dubois', 'Thomas', 'Robert', 'Richard', 'Petit', 'Durand',
-  'Leroy', 'Moreau', 'Simon', 'Laurent', 'Lefebvre', 'Michel', 'Garcia', 'David',
-  'Bertrand', 'Roux', 'Vincent', 'Fournier', 'Morel', 'Girard', 'Andre', 'Lefevre',
-  'Mercier', 'Dupont', 'Lambert', 'Bonnet', 'Francois', 'Martinez', 'Legrand', 'Garnier',
-  'Faure', 'Rousseau', 'Blanc', 'Guerin', 'Muller', 'Henry', 'Roussel', 'Nicolas'
-];
+  'Martin' , 'Bernard' , 'Dubois' , 'Thomas' , 'Robert' , 'Richard' , 'Petit' , 'Durand' ,
+  'Leroy' , 'Moreau' , 'Simon' , 'Laurent' , 'Lefebvre' , 'Michel' , 'Garcia' , 'David' ,
+  'Bertrand' , 'Roux' , 'Vincent' , 'Fournier' , 'Morel' , 'Girard' , 'André' , 'Lefevre' ,
+  'Mercier' , 'Dupont' , 'Lambert' , 'Bonnet' , 'François' , 'Martinez' , 'Legrand' , 'Garnier' ,
+  'Faure' , 'Rousseau' , 'Blanc' , 'Guérin' , 'Müller' , 'Henry' , 'Roussel' , 'Nicolas'
+] ;
 
-function getRandomIdentity() {
-  const firstName = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
-  const lastName = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
-  return { firstName, lastName };
+fonction  getRandomIdentity ( )  {
+  const  firstName = FIRST_NAMES [ Math . floor ( Math . random ( ) * FIRST_NAMES . length ) ] ;
+  const  lastName = LAST_NAMES [ Math . floor ( Math . random ( ) * LAST_NAMES . length ) ] ;
+  retourner  {  prénom , nom  } ;
 }
 
-// In-Memory Session & User Ledger (Persists during server lifecycle)
-const userSessions = {};
-const userLedger = {};
+// Journal de session et d'utilisateurs en mémoire (perd pendant le cycle de vie du serveur)
+const  userSessions = { } ;
+const  userLedger = { } ;
 
-function getUserData(userId, username, firstName) {
-  if (!userLedger[userId]) {
-    userLedger[userId] = {
-      userId: String(userId),
-      username: username || 'utilisateur',
-      firstName: firstName || 'Opérateur',
+fonction  getUserData ( userId , username , firstName )  {
+  si  ( ! userLedger [ userId ] )  {
+    userLedger [ userId ] = {
+      userId : Chaîne ( userId ) ,
+      nom d'utilisateur : nom d'utilisateur || 'utilisateur' ,
+      prénom : prénom || 'Opérateur' ,
       tasksCompleted: 0,
       balance: 0.00,
       pendingBalance: 0.00,
