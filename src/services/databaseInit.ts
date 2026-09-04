@@ -430,6 +430,12 @@ export async function initializeDatabase() {
         ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'fr';
 
       ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS usdt_address TEXT;
+
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS binance_id TEXT;
+
+      ALTER TABLE users
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
       ALTER TABLE users

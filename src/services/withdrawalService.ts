@@ -14,10 +14,28 @@ export async function requestWithdrawal(
   method: string,
   destination: string
 ): Promise<{ success: boolean; message: string; withdrawal?: WithdrawalRecord; newBalance?: number }> {
+  const cleanMethod = (method || '').trim();
+  const isUsdt = cleanMethod.toLowerCase().includes('usdt');
+  const isBinance = cleanMethod.toLowerCase().includes('binance');
+
+  if (!isUsdt && !isBinance) {
+    return {
+      success: false,
+      message: 'Seuls les retraits via USDT ou Binance sont supportés. Les méthodes Mobile Money ne sont pas acceptées.'
+    };
+  }
+
   if (isNaN(amount) || amount < MIN_WITHDRAWAL_USD) {
     return {
       success: false,
       message: `Le montant minimum de retrait est de $${MIN_WITHDRAWAL_USD.toFixed(2)} USD.`
+    };
+  }
+
+  if (!destination || !destination.trim()) {
+    return {
+      success: false,
+      message: `Veuillez fournir une adresse ${isUsdt ? 'USDT (TRC20)' : 'Binance ID'} valide.`
     };
   }
 
@@ -29,7 +47,7 @@ export async function requestWithdrawal(
 
     // 1. Get user with lock
     const userRes = await client.query(
-      `SELECT id FROM users WHERE telegram_user_id = $1 FOR UPDATE`,
+      `SELECT id, usdt_address, binance_id FROM users WHERE telegram_user_id = $1 FOR UPDATE`,
       [tgId]
     );
 
@@ -38,6 +56,19 @@ export async function requestWithdrawal(
     }
 
     const userId = userRes.rows[0].id;
+
+    // Update user withdrawal info automatically
+    if (isUsdt) {
+      await client.query(
+        `UPDATE users SET usdt_address = $1, updated_at = NOW() WHERE id = $2`,
+        [destination.trim(), userId]
+      );
+    } else if (isBinance) {
+      await client.query(
+        `UPDATE users SET binance_id = $1, updated_at = NOW() WHERE id = $2`,
+        [destination.trim(), userId]
+      );
+    }
 
     // 2. Lock and get wallet row
     const walletRes = await client.query(

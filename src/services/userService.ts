@@ -7,6 +7,8 @@ export interface PersistentUser {
   first_name: string | null;
   last_name: string | null;
   language: string;
+  usdt_address?: string | null;
+  binance_id?: string | null;
 }
 
 export interface Wallet {
@@ -227,6 +229,48 @@ export async function getUserProfile(telegramUserId: string | number) {
 }
 
 /**
+ * Récupérer les adresses de retrait enregistrées (USDT / Binance)
+ */
+export async function getUserWithdrawalInfo(
+  telegramUserId: string | number
+): Promise<{ usdtAddress: string; binanceId: string }> {
+  try {
+    const res = await pool.query(
+      `SELECT usdt_address, binance_id FROM users WHERE telegram_user_id = $1`,
+      [String(telegramUserId)]
+    );
+    if (res.rows.length === 0) return { usdtAddress: '', binanceId: '' };
+    return {
+      usdtAddress: res.rows[0].usdt_address || '',
+      binanceId: res.rows[0].binance_id || ''
+    };
+  } catch (err) {
+    return { usdtAddress: '', binanceId: '' };
+  }
+}
+
+/**
+ * Enregistrer ou mettre à jour les adresses de retrait (USDT / Binance)
+ */
+export async function updateUserWithdrawalInfo(
+  telegramUserId: string | number,
+  data: { usdtAddress?: string; binanceId?: string }
+): Promise<{ success: boolean; usdtAddress: string; binanceId: string }> {
+  const tgId = String(telegramUserId);
+  await getOrCreateUser(tgId);
+  const current = await getUserWithdrawalInfo(tgId);
+  const newUsdt = data.usdtAddress !== undefined ? data.usdtAddress.trim() : current.usdtAddress;
+  const newBinance = data.binanceId !== undefined ? data.binanceId.trim() : current.binanceId;
+
+  await pool.query(
+    `UPDATE users SET usdt_address = $1, binance_id = $2, updated_at = NOW() WHERE telegram_user_id = $3`,
+    [newUsdt, newBinance, tgId]
+  );
+
+  return { success: true, usdtAddress: newUsdt, binanceId: newBinance };
+}
+
+/**
  * Récupérer tous les portefeuilles pour l'administration
  */
 export async function getAllWallets(): Promise<any[]> {
@@ -261,3 +305,36 @@ export async function getAllWallets(): Promise<any[]> {
     return [];
   }
 }
+
+/**
+ * Enregistrer ou mettre à jour les informations de retrait d'un utilisateur (USDT et/ou Binance ID)
+ */
+export async function saveUserWithdrawalInfo(
+  telegramUserId: string | number,
+  info: { usdtAddress?: string | null; binanceId?: string | null }
+): Promise<PersistentUser> {
+  const user = await getOrCreateUser(telegramUserId);
+  const updates: string[] = [];
+  const values: any[] = [];
+  let paramIndex = 1;
+
+  if (info.usdtAddress !== undefined) {
+    updates.push(`usdt_address = $${paramIndex++}`);
+    values.push(info.usdtAddress?.trim() || null);
+  }
+
+  if (info.binanceId !== undefined) {
+    updates.push(`binance_id = $${paramIndex++}`);
+    values.push(info.binanceId?.trim() || null);
+  }
+
+  if (updates.length > 0) {
+    values.push(user.id);
+    const sql = `UPDATE users SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramIndex} RETURNING *`;
+    const res = await pool.query(sql, values);
+    return res.rows[0];
+  }
+
+  return user;
+}
+

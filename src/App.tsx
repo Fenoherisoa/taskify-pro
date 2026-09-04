@@ -314,6 +314,7 @@ export default function App() {
               selectedFilter={selectedFilter}
               onFilterChange={setSelectedFilter}
               onValidateTask={handleValidateTask}
+              onRejectTask={handleRejectTask}
               onBotCheckTask={handleBotCheckTask}
             />
           </div>

@@ -601,6 +601,33 @@ export async function performBotAccountCheck(
   const task = res.rows[0];
   const actualTaskId = task.task_id;
 
+  if (!task.uid || !task.uid.trim()) {
+    return await rejectTask(
+      actualTaskId,
+      'BOT',
+      'UID Facebook manquant ou non renseigné',
+      'BOT'
+    );
+  }
+
+  // Check if UID is already used/duplicate in an existing verified task
+  try {
+    const dupRes = await pool.query(
+      `SELECT task_id FROM tasks WHERE uid = $1 AND task_id != $2 AND (account_status = 'verified' OR validation_status = 'validated') LIMIT 1`,
+      [task.uid.trim(), actualTaskId]
+    );
+    if (dupRes.rows.length > 0) {
+      return await rejectTask(
+        actualTaskId,
+        'BOT',
+        `Compte déjà enregistré et vérifié (doublon avec la tâche ${dupRes.rows[0].task_id})`,
+        'BOT'
+      );
+    }
+  } catch (err: any) {
+    console.warn('⚠️ UID duplicate check warning:', err.message);
+  }
+
   // Run the Facebook checker
   const checkResult = await checkFacebookUid(task.uid, settings);
 

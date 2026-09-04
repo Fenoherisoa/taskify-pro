@@ -10,7 +10,9 @@ import {
   getUserProfile,
   setUserLanguage,
   getUserStats,
-  getAllWallets
+  getAllWallets,
+  getUserWithdrawalInfo,
+  updateUserWithdrawalInfo
 } from './src/services/userService';
 import {
   getAllTasks,
@@ -575,50 +577,6 @@ app.get('/api/telegram/mini-app/tasks', async (req, res) => {
   }
 });
 
-app.post('/api/tasks/:taskId/validate', async (req, res) => {
-  try {
-    const { taskId } = req.params;
-    const {
-      validatorId = 'admin',
-      notes = 'Validé avec succès',
-      reason
-    } = req.body;
-
-    const validated = await validateTask(taskId, validatorId, reason || notes, 'ADMIN');
-    return res.json({
-      success: true,
-      validated: true,
-      status: 'validated',
-      task: validated
-    });
-  } catch (error: any) {
-    console.error('❌ Validation error:', error.message);
-    return res.status(400).json({
-      success: false,
-      message: error.message || 'Erreur lors de la validation'
-    });
-  }
-});
-
-app.post('/api/tasks/:taskId/bot-check', async (req, res) => {
-  try {
-    const { taskId } = req.params;
-    const result = await performBotAccountCheck(taskId, botSettings);
-    return res.json({
-      success: true,
-      task: result
-    });
-  } catch (error: any) {
-    console.error('❌ Bot check error:', error.message);
-    return res.status(400).json({
-      success: false,
-      message: error.message || 'Erreur lors de la vérification par le bot'
-    });
-  }
-});
-
-
-
 // ----------------------------------------------------
 // FINANCIAL & COMMISSION CONSTANTS (USD)
 // ----------------------------------------------------
@@ -795,7 +753,7 @@ const userSessions: Record<string, {
   password?: string;
   uid?: string;
   cookies?: string;
-  language?: 'fr' | 'en' | 'ru' | 'es' | 'id';
+  language?: 'fr' | 'en' | 'ru' | 'es' | 'id' | 'mg';
   balance?: number;
   tasksCompleted?: number;
   referralsCount?: number;
@@ -819,8 +777,13 @@ async function syncRowToGoogleSheets(task: any) {
 
   const data = {
     timestamp: task.createdAt || new Date().toISOString(),
-    id: task.id || '',
+    id: task.id || task.taskId || '',
     status: task.status || '',
+    accountStatus: task.accountStatus || 'pending_verification',
+    verificationStatus: task.verificationStatus || 'pending',
+    verificationMethod: task.verificationMethod || 'NONE',
+    verificationResult: task.verificationResult || 'PENDING',
+    verificationReason: task.verificationReason || task.validationReason || '',
     uid: task.uid || '',
     firstName: task.firstName || '',
     lastName: task.lastName || '',
@@ -828,14 +791,18 @@ async function syncRowToGoogleSheets(task: any) {
     cookies: task.cookies || '',
     telegramUserId: task.telegramUserId || '',
     telegramUsername: task.telegramUsername || '',
-    notes: task.notes || '',
+    notes: task.notes || task.verificationReason || '',
     taskType: task.taskType || '',
     rewardUSD: task.rewardUSD ?? ''
   };
 
   const payload = {
-    action: 'insert_task',
+    action: 'sync_task', // Tells Google Apps Script to update existing row by Task ID (prevent duplicates)
     selectedFields,
+    id: task.id || task.taskId || '',
+    uid: task.uid || '',
+    status: task.status || '',
+    accountStatus: task.accountStatus || 'pending_verification',
     data
   };
 
@@ -1038,6 +1005,40 @@ const TRANSLATIONS = {
     awaiting_uid: `✍️ *Langkah 1/2: Kirim UID Facebook*\n\nSilakan tempel **UID Facebook** Anda (contoh: \`100084928172910\`) :`,
     awaiting_cookies: `🍪 *Langkah 2/2: Kirim Cookies*\n\nSilakan tempel **Cookies Facebook** lengkap (contoh: \`datr=...; c_user=...; xs=...\`) :`,
     cancelled: `❌ *Proses dibatalkan.*\nTidak ada data yang disimpan.`
+  },
+  mg: {
+    welcome: `👋 *Tongasoa eto amin'ny ${botSettings.platformName} (@TaskifyProBot) !*\n\n` +
+      `Sehatra ofisialy fanatontosana asa sy fakana vola.\n\n` +
+      `💵 *Karama :* \`$${TASK_REWARD_USD.toFixed(2)}\` isaky ny kaonty voamarina\n` +
+      `🎁 *Tombony Fanasana :* \`$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` amin'ny fisoratana anarana + \`${REFERRAL_COMMISSION_PERCENT}%\` amin'ny asan'ny olona nasainao\n` +
+      `🎯 *Farafahakeliny azo alaina :* \`$${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
+      `Ampiasao ny safidy eto ambany hanombohana :`,
+    balance_title: `💰 *Ny Solde & Asanao*`,
+    tasks_title: `🌐 *Asa : Famoronana Kaonty Facebook*`,
+    withdrawal_title: `🏦 *Fangatahana Fanalana Vola*`,
+    support_title: `📞 *Fanampiana & Fifandraisana*`,
+    referral_title: `👥 *Fandaharana Fanasana Olona & Tombony*`,
+    leaderboard_title: `🏆 *Filaharana Ireo Mpisehatra Mahay Indrindra*`,
+    lang_title: `🪩 *Safidy Fiteny*`,
+    lang_confirm: `✅ Voatsonga soa aman-tsara ny fiteny **Malagasy** 🇲🇬.`,
+    btn_tasks: `📋 Hanao Asa`,
+    btn_withdraw: `🏦 Mangataka Vola`,
+    btn_support: `💬 Hifandray amin'ny Fanampiana`,
+    btn_rules: `ℹ️ Fitsipika Arahina`,
+    btn_cancel: `❌ Aoka ihany`,
+    btn_cookies: `🍪 Cookies (Atoro hevitra)`,
+    btn_2fa: `🔐 2FA (Fanalahidy)`,
+    btn_send_uid: `📥 Handefa ny UID`,
+    btn_share_ref: `📤 Hizarana ny Rohy Fanasana`,
+    cookies_reward_notice: `💵 *Karama isaky ny kaonty voamarina :* \`$${TASK_REWARD_USD.toFixed(2)}\``,
+    task_rules_text: `📋 *Fitsipika Famoronana Kaonty Facebook*\n\n` +
+      `1. Ampiasao foana ny anarana sy fanampin'anarana nomena.\n` +
+      `2. Ampiasao ny teny miafina nomena tsy asiana fiovana.\n` +
+      `3. Raiso ny cookies feno misy \`c_user\`, \`datr\` ary \`xs\`.\n` +
+      `4. Karama : \`$${TASK_REWARD_USD.toFixed(2)}\` isaky ny asa voamarina.`,
+    awaiting_uid: `✍️ *Dingana 1/2 : Mandefa UID Facebook*\n\nApetaho eto ny **UID Facebook** (ohatra : \`100084928172910\`) :`,
+    awaiting_cookies: `🍪 *Dingana 2/2 : Mandefa Cookies*\n\nApetaho eto ny **Cookies Facebook** feno (ohatra : \`datr=...; c_user=...; xs=...\`) :`,
+    cancelled: `❌ *Natsahatra ny hetsika.*\nTsy nisy tahiry voatahiry.`
   }
 };
 
@@ -1387,16 +1388,22 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const wallet = await getUserWallet(userId);
     const balance = wallet ? wallet.balance : 0;
     const isEligible = balance >= MIN_WITHDRAWAL_USD;
+    const withdrawalInfo = await getUserWithdrawalInfo(userId);
+
+    const savedUsdt = withdrawalInfo.usdtAddress ? `\`${withdrawalInfo.usdtAddress}\`` : '_Non configurée_';
+    const savedBinance = withdrawalInfo.binanceId ? `\`${withdrawalInfo.binanceId}\`` : '_Non configuré_';
 
     await ctx.reply(
       `${t.withdrawal_title}\n\n` +
       `💵 Solde disponible : *${balance.toFixed(3)} $* USD\n` +
       `🎯 Seuil minimum de retrait : *${MIN_WITHDRAWAL_USD.toFixed(2)} $* USD\n` +
       `🛡️ Statut : ${isEligible ? '🟢 *Éligible au retrait immédiat*' : '🟡 *En attente du seuil ($' + MIN_WITHDRAWAL_USD.toFixed(2) + ')*'}\n\n` +
-      `Moyens de paiement pris en charge :\n` +
-      `• 🪙 *Crypto USDT* (TRC20 / BEP20 - 0 frais)\n` +
-      `• 📱 *Mobile Money* (MVola, Orange Money, Airtel Money)\n` +
-      `• 💳 *Virement Bancaire (SEPA / International)*\n\n` +
+      `📋 *Vos Coordonnées Enregistrées :*\n` +
+      `• 🪙 *Adresse USDT (TRC20) :* ${savedUsdt}\n` +
+      `• 🟡 *Binance ID :* ${savedBinance}\n\n` +
+      `Moyens de paiement acceptés :\n` +
+      `• 🪙 *Crypto USDT* (TRC20 - Réseau Tron)\n` +
+      `• 🟡 *Binance Pay / Binance ID*\n\n` +
       (isEligible
         ? `✅ _Sélectionnez votre moyen de retrait ci-dessous :_`
         : `⚠️ _Complétez encore ${Math.max(1, Math.ceil((MIN_WITHDRAWAL_USD - balance) / TASK_REWARD_USD))} tâche(s) pour débloquer votre premier retrait._`),
@@ -1404,9 +1411,13 @@ function setupTelegrafHandlers(bot: Telegraf) {
         parse_mode: 'Markdown',
         ...MAIN_REPLY_KEYBOARD,
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('🪙 Crypto USDT (TRC-20)', 'withdraw_crypto')],
-          [Markup.button.callback('📱 Mobile Money (MVola/Orange/Airtel)', 'withdraw_mobile_money')],
-          [Markup.button.callback('💳 Virement Bancaire (SEPA)', 'withdraw_bank')]
+          [
+            Markup.button.callback('🪙 Retrait USDT (TRC-20)', 'withdraw_crypto'),
+            Markup.button.callback('🟡 Retrait Binance ID', 'withdraw_binance')
+          ],
+          [
+            Markup.button.callback('⚙️ Configurer mes adresses', 'config_payout_info')
+          ]
         ])
       }
     );
@@ -1501,6 +1512,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const langNames: Record<string, string> = {
       fr: '🇫🇷 Français',
       en: '🇬🇧 English',
+      mg: '🇲🇬 Malagasy',
       ru: '🇷🇺 Русский',
       es: '🇪🇸 Español',
       id: '🇮🇩 Bahasa Indonesia'
@@ -1519,10 +1531,11 @@ function setupTelegrafHandlers(bot: Telegraf) {
             Markup.button.callback('🇬🇧 English', 'set_lang_en')
           ],
           [
-            Markup.button.callback('🇷🇺 Русский', 'set_lang_ru'),
-            Markup.button.callback('🇪🇸 Español', 'set_lang_es')
+            Markup.button.callback('🇲🇬 Malagasy', 'set_lang_mg'),
+            Markup.button.callback('🇷🇺 Русский', 'set_lang_ru')
           ],
           [
+            Markup.button.callback('🇪🇸 Español', 'set_lang_es'),
             Markup.button.callback('🇮🇩 Bahasa Indonesia', 'set_lang_id')
           ]
         ])
@@ -1561,6 +1574,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
     userSessions[userId].language = 'fr';
+    await setUserLanguage(userId, 'fr').catch(() => {});
     await ctx.answerCbQuery('Langue : Français 🇫🇷 configuré !');
     const t = getT('fr');
     await renderScreen(ctx, t.lang_confirm, {
@@ -1575,8 +1589,24 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
     userSessions[userId].language = 'en';
+    await setUserLanguage(userId, 'en').catch(() => {});
     await ctx.answerCbQuery('Language: English 🇬🇧 set!');
     const t = getT('en');
+    await renderScreen(ctx, t.lang_confirm, {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📋 ' + t.btn_tasks, 'task_facebook')],
+        [Markup.button.callback('💰 ' + t.btn_withdraw, 'action_request_withdrawal')]
+      ])
+    });
+  });
+
+  bot.action('set_lang_mg', async (ctx) => {
+    const userId = String(ctx.from?.id || 'unknown');
+    if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
+    userSessions[userId].language = 'mg';
+    await setUserLanguage(userId, 'mg').catch(() => {});
+    await ctx.answerCbQuery('Fiteny : Malagasy 🇲🇬 voatsonga !');
+    const t = getT('mg');
     await renderScreen(ctx, t.lang_confirm, {
       ...Markup.inlineKeyboard([
         [Markup.button.callback('📋 ' + t.btn_tasks, 'task_facebook')],
@@ -1589,6 +1619,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
     userSessions[userId].language = 'ru';
+    await setUserLanguage(userId, 'ru').catch(() => {});
     await ctx.answerCbQuery('Язык: Русский 🇷🇺 выбран!');
     const t = getT('ru');
     await renderScreen(ctx, t.lang_confirm, {
@@ -1603,6 +1634,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
     userSessions[userId].language = 'es';
+    await setUserLanguage(userId, 'es').catch(() => {});
     await ctx.answerCbQuery('Idioma: Español 🇪🇸 configurado!');
     const t = getT('es');
     await renderScreen(ctx, t.lang_confirm, {
@@ -1617,6 +1649,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const userId = String(ctx.from?.id || 'unknown');
     if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
     userSessions[userId].language = 'id';
+    await setUserLanguage(userId, 'id').catch(() => {});
     await ctx.answerCbQuery('Bahasa: Indonesia 🇮🇩 dipilih!');
     const t = getT('id');
     await renderScreen(ctx, t.lang_confirm, {
@@ -1627,7 +1660,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
     });
   });
 
-  // Retrait Sub-actions
+  // Retrait Sub-actions (USDT & Binance ONLY)
   bot.action('action_request_withdrawal', async (ctx) => {
     await ctx.answerCbQuery();
     const userId = String(ctx.from?.id || 'unknown');
@@ -1635,6 +1668,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
     const t = getT(session.language);
     const wallet = await getUserWallet(userId);
     const balance = wallet ? wallet.balance : 0;
+    const withdrawalInfo = await getUserWithdrawalInfo(userId);
 
     if (balance < MIN_WITHDRAWAL_USD) {
       return renderScreen(
@@ -1649,55 +1683,179 @@ function setupTelegrafHandlers(bot: Telegraf) {
       );
     }
 
-    await renderScreen(
-      ctx,
-      `🏦 *Sélectionnez votre méthode de retrait :*`,
-      Markup.inlineKeyboard([
-        [Markup.button.callback('🪙 Crypto USDT (TRC-20 / BEP-20)', 'withdraw_crypto')],
-        [Markup.button.callback('📱 Mobile Money (MVola/Orange/Airtel)', 'withdraw_mobile_money')],
-        [Markup.button.callback('💳 Virement Bancaire (SEPA)', 'withdraw_bank')]
-      ])
-    );
-  });
+    const savedUsdt = withdrawalInfo.usdtAddress ? `\`${withdrawalInfo.usdtAddress}\`` : '_Non configurée_';
+    const savedBinance = withdrawalInfo.binanceId ? `\`${withdrawalInfo.binanceId}\`` : '_Non configuré_';
 
-  bot.action('withdraw_mobile_money', async (ctx) => {
-    await ctx.answerCbQuery();
     await renderScreen(
       ctx,
-      `📱 *Retrait Mobile Money (MVola, Orange Money, Airtel Money)*\n\n` +
-      `Le montant minimum de retrait est de *${MIN_WITHDRAWAL_USD.toFixed(2)} $* USD.\n` +
-      `Pour soumettre une demande manuelle immédiate, écrivez au support : @TaskifySupport`,
+      `🏦 *Demande de Retrait (USDT & Binance Uniquement)*\n\n` +
+      `Solde disponible : *${balance.toFixed(3)} $* USD\n\n` +
+      `📋 *Vos Coordonnées Enregistrées :*\n` +
+      `• 🪙 *USDT (TRC-20) :* ${savedUsdt}\n` +
+      `• 🟡 *Binance ID :* ${savedBinance}\n\n` +
+      `_Sélectionnez votre méthode de paiement ci-dessous :_`,
       Markup.inlineKeyboard([
-        [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
-        [Markup.button.callback('🔙 Retour', 'action_cancel')]
+        [
+          Markup.button.callback('🪙 Retrait USDT (TRC-20)', 'withdraw_crypto'),
+          Markup.button.callback('🟡 Retrait Binance ID', 'withdraw_binance')
+        ],
+        [
+          Markup.button.callback('⚙️ Configurer / Modifier mes adresses', 'config_payout_info')
+        ],
+        [
+          Markup.button.callback('🔙 Retour', 'action_cancel')
+        ]
       ])
     );
   });
 
   bot.action('withdraw_crypto', async (ctx) => {
     await ctx.answerCbQuery();
+    const userId = String(ctx.from?.id || 'unknown');
+    const withdrawalInfo = await getUserWithdrawalInfo(userId);
+    const wallet = await getUserWallet(userId);
+    const balance = wallet ? wallet.balance : 0;
+
+    if (!withdrawalInfo.usdtAddress) {
+      if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
+      userSessions[userId].step = 'AWAITING_USDT_ADDR';
+      return renderScreen(
+        ctx,
+        `🪙 *Retrait Crypto USDT (TRC20)*\n\n` +
+        `Aucune adresse USDT enregistrée pour votre compte.\n\n` +
+        `Veuillez envoyer maintenant votre **adresse USDT (TRC20)** en réponse à ce message :`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('❌ Annuler', 'action_cancel')]
+        ])
+      );
+    }
+
+    // Process immediate withdrawal using saved address
+    const withdrawAmount = Math.max(MIN_WITHDRAWAL_USD, balance);
+    const result = await requestWithdrawal(userId, withdrawAmount, 'USDT', withdrawalInfo.usdtAddress);
+
+    if (result.success) {
+      await renderScreen(
+        ctx,
+        `🎉 *Demande de Retrait USDT Confirmée !*\n\n` +
+        `Montant : \`$${withdrawAmount.toFixed(2)} USD\`\n` +
+        `Méthode : \`USDT (TRC-20)\`\n` +
+        `Adresse : \`${withdrawalInfo.usdtAddress}\`\n\n` +
+        `Votre demande est en cours de traitement par l'administration.`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📋 Retour aux Tâches', 'task_facebook')]
+        ])
+      );
+    } else {
+      await renderScreen(
+        ctx,
+        `⚠️ *Erreur lors du retrait USDT :*\n\n${result.message}`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔙 Retour', 'action_request_withdrawal')]
+        ])
+      );
+    }
+  });
+
+  bot.action('withdraw_binance', async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = String(ctx.from?.id || 'unknown');
+    const withdrawalInfo = await getUserWithdrawalInfo(userId);
+    const wallet = await getUserWallet(userId);
+    const balance = wallet ? wallet.balance : 0;
+
+    if (!withdrawalInfo.binanceId) {
+      if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
+      userSessions[userId].step = 'AWAITING_BINANCE_ID';
+      return renderScreen(
+        ctx,
+        `🟡 *Retrait Binance ID*\n\n` +
+        `Aucun identifiant Binance enregistré pour votre compte.\n\n` +
+        `Veuillez envoyer maintenant votre **Binance ID / Pay ID** en réponse à ce message :`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('❌ Annuler', 'action_cancel')]
+        ])
+      );
+    }
+
+    const withdrawAmount = Math.max(MIN_WITHDRAWAL_USD, balance);
+    const result = await requestWithdrawal(userId, withdrawAmount, 'Binance', withdrawalInfo.binanceId);
+
+    if (result.success) {
+      await renderScreen(
+        ctx,
+        `🎉 *Demande de Retrait Binance Confirmée !*\n\n` +
+        `Montant : \`$${withdrawAmount.toFixed(2)} USD\`\n` +
+        `Méthode : \`Binance ID\`\n` +
+        `Identifiant : \`${withdrawalInfo.binanceId}\`\n\n` +
+        `Votre demande est en cours de traitement par l'administration.`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📋 Retour aux Tâches', 'task_facebook')]
+        ])
+      );
+    } else {
+      await renderScreen(
+        ctx,
+        `⚠️ *Erreur lors du retrait Binance :*\n\n${result.message}`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔙 Retour', 'action_request_withdrawal')]
+        ])
+      );
+    }
+  });
+
+  bot.action('config_payout_info', async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = String(ctx.from?.id || 'unknown');
+    const info = await getUserWithdrawalInfo(userId);
+
     await renderScreen(
       ctx,
-      `🪙 *Retrait Crypto USDT (TRC20 / BEP20)*\n\n` +
-      `Frais de réseau : 0 $ (Pris en charge).\n` +
-      `Transmettez votre adresse USDT directement à l'administrateur : @TaskifySupport`,
+      `⚙️ *Configuration de vos adresses de paiement*\n\n` +
+      `Seuls USDT et Binance sont pris en charge.\n\n` +
+      `• 🪙 *Adresse USDT (TRC-20) :* ${info.usdtAddress ? '`' + info.usdtAddress + '`' : '_Non configurée_'}\n` +
+      `• 🟡 *Binance ID :* ${info.binanceId ? '`' + info.binanceId + '`' : '_Non configuré_'}\n\n` +
+      `_Choisissez l'information à mettre à jour :_`,
       Markup.inlineKeyboard([
-        [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
-        [Markup.button.callback('🔙 Retour', 'action_cancel')]
+        [
+          Markup.button.callback('🪙 Modifier Adresse USDT', 'set_usdt_address'),
+          Markup.button.callback('🟡 Modifier Binance ID', 'set_binance_id')
+        ],
+        [
+          Markup.button.callback('🔙 Retour au Retrait', 'action_request_withdrawal')
+        ]
       ])
     );
   });
 
-  bot.action('withdraw_bank', async (ctx) => {
+  bot.action('set_usdt_address', async (ctx) => {
     await ctx.answerCbQuery();
+    const userId = String(ctx.from?.id || 'unknown');
+    if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
+    userSessions[userId].step = 'AWAITING_USDT_ADDR';
+
     await renderScreen(
       ctx,
-      `💳 *Virement Bancaire (SEPA / International)*\n\n` +
-      `Délai de traitement : 24h à 48h ouvrées.\n` +
-      `Transmettez vos coordonnées bancaires (IBAN/BIC) à @TaskifySupport`,
+      `🪙 *Enregistrement Adresse USDT (TRC-20)*\n\n` +
+      `Veuillez envoyer votre adresse de portefeuille USDT (réseau TRC20, commence par 'T') :`,
       Markup.inlineKeyboard([
-        [Markup.button.url('💬 Contacter le Support', 'https://t.me/TaskifySupport')],
-        [Markup.button.callback('🔙 Retour', 'action_cancel')]
+        [Markup.button.callback('❌ Annuler', 'config_payout_info')]
+      ])
+    );
+  });
+
+  bot.action('set_binance_id', async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = String(ctx.from?.id || 'unknown');
+    if (!userSessions[userId]) userSessions[userId] = { step: 'START' };
+    userSessions[userId].step = 'AWAITING_BINANCE_ID';
+
+    await renderScreen(
+      ctx,
+      `🟡 *Enregistrement Binance ID*\n\n` +
+      `Veuillez envoyer votre identifiant Binance (Binance UID ou Binance Pay ID) :`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('❌ Annuler', 'config_payout_info')]
       ])
     );
   });
@@ -1709,7 +1867,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
       `❓ *FAQ & Questions Fréquentes*\n\n` +
       `• *Rémunération par tâche :* $${TASK_REWARD_USD.toFixed(2)} USD par compte validé.\n` +
       `• *Parrainage :* $${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)} bonus + ${REFERRAL_COMMISSION_PERCENT}% ($${REFERRAL_TASK_COMMISSION_USD.toFixed(3)}) récurrent par tâche.\n` +
-      `• *Seuil de retrait :* Retrait dès $${MIN_WITHDRAWAL_USD.toFixed(2)} USD via Crypto ou Mobile Money.\n` +
+      `• *Seuil de retrait :* Retrait dès $${MIN_WITHDRAWAL_USD.toFixed(2)} USD via USDT (TRC-20) ou Binance ID.\n` +
       `• *Besoin d'aide ?* Écrivez à @TaskifySupport`,
       Markup.inlineKeyboard([
         [Markup.button.callback('🚀 Démarrer une Tâche', 'task_facebook')]
@@ -1954,6 +2112,42 @@ function setupTelegrafHandlers(bot: Telegraf) {
           ...Markup.inlineKeyboard([
             [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')],
             [Markup.button.callback('💰 ' + t.balance_title.split('*')[1] || 'Solde', 'action_check_balance')]
+          ])
+        }
+      );
+    }
+
+    if (session.step === 'AWAITING_USDT_ADDR') {
+      delete session.step;
+      const usdtAddress = text.trim();
+      await updateUserWithdrawalInfo(userId, { usdtAddress }).catch(() => {});
+      return ctx.reply(
+        `✅ *Adresse USDT (TRC-20) enregistrée avec succès !*\n\n` +
+        `\`${usdtAddress}\`\n\n` +
+        `Vous pouvez maintenant effectuer un retrait ou continuer vos tâches.`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🏦 Demander un Retrait', 'action_request_withdrawal')],
+            [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')]
+          ])
+        }
+      );
+    }
+
+    if (session.step === 'AWAITING_BINANCE_ID') {
+      delete session.step;
+      const binanceId = text.trim();
+      await updateUserWithdrawalInfo(userId, { binanceId }).catch(() => {});
+      return ctx.reply(
+        `✅ *Identifiant Binance ID enregistré avec succès !*\n\n` +
+        `\`${binanceId}\`\n\n` +
+        `Vous pouvez maintenant effectuer un retrait ou continuer vos tâches.`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🏦 Demander un Retrait', 'action_request_withdrawal')],
+            [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')]
           ])
         }
       );
@@ -2425,6 +2619,26 @@ app.post('/api/user/:telegramUserId/language', async (req, res) => {
     const { language } = req.body;
     const success = await setUserLanguage(req.params.telegramUserId, language);
     res.json({ success, language });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5d-2. User Saved Withdrawal Info (USDT & Binance ONLY)
+app.get('/api/user/:telegramUserId/withdrawal-info', async (req, res) => {
+  try {
+    const info = await getUserWithdrawalInfo(req.params.telegramUserId);
+    res.json(info);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/user/:telegramUserId/withdrawal-info', async (req, res) => {
+  try {
+    const { usdtAddress, binanceId } = req.body;
+    const result = await updateUserWithdrawalInfo(req.params.telegramUserId, { usdtAddress, binanceId });
+    res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

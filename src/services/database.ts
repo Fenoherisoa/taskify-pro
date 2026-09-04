@@ -363,6 +363,23 @@ function executeMockQuery(text: string, params: any[] = []): { rows: any[]; rowC
     return { rows: user ? [{ ...user }] : [], rowCount: user ? 1 : 0 };
   }
 
+  if (lower.startsWith('update users set') && lower.includes('where id =')) {
+    const userId = Number(params[params.length - 1]);
+    const user = mockUsers.find(u => u.id === userId);
+    if (user) {
+      if (lower.includes('usdt_address =')) {
+        const usdtIdx = params.findIndex((p: any, idx: number) => lower.includes(`usdt_address = $${idx + 1}`));
+        if (usdtIdx !== -1) user.usdt_address = params[usdtIdx];
+      }
+      if (lower.includes('binance_id =')) {
+        const binanceIdx = params.findIndex((p: any, idx: number) => lower.includes(`binance_id = $${idx + 1}`));
+        if (binanceIdx !== -1) user.binance_id = params[binanceIdx];
+      }
+      user.updated_at = new Date().toISOString();
+    }
+    return { rows: user ? [{ ...user }] : [], rowCount: user ? 1 : 0 };
+  }
+
   // ==========================================================
   // WALLETS OPERATIONS
   // ==========================================================
@@ -809,7 +826,7 @@ if (connectionString) {
     realPool = new Pool({
       connectionString,
       ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 10000,
+      connectionTimeoutMillis: 3000,
       max: 10
     });
     realPool.on('error', (err) => {

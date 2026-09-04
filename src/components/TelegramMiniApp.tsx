@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { translations, SupportedLanguage } from '../data/translations';
 
 declare global {
   interface Window {
@@ -105,16 +106,30 @@ export default function TelegramMiniApp() {
   const [taskStep, setTaskStep] =
     useState<'type' | 'form'>('type');
 
-  // Withdrawal state
+  // Withdrawal state (USDT and Binance ONLY)
   const [withdrawAmount, setWithdrawAmount] = useState('1.00');
-  const [withdrawMethod, setWithdrawMethod] = useState('MVola');
+  const [withdrawMethod, setWithdrawMethod] = useState<'USDT' | 'Binance'>('USDT');
   const [withdrawDestination, setWithdrawDestination] = useState('');
   const [withdrawLoading, setWithdrawLoading] = useState(false);
   const [withdrawMessage, setWithdrawMessage] = useState('');
 
+  // Saved withdrawal info (USDT and Binance ONLY)
+  const [savedUsdtAddress, setSavedUsdtAddress] = useState('');
+  const [savedBinanceId, setSavedBinanceId] = useState('');
+  const [isEditingAddresses, setIsEditingAddresses] = useState(false);
+  const [editUsdtAddress, setEditUsdtAddress] = useState('');
+  const [editBinanceId, setEditBinanceId] = useState('');
+  const [savingAddresses, setSavingAddresses] = useState(false);
+  const [addressSaveMessage, setAddressSaveMessage] = useState('');
+
   // Language state
-  const [currentLanguage, setCurrentLanguage] = useState('fr');
+  const [currentLanguage, setCurrentLanguage] = useState<'fr' | 'en' | 'mg'>('fr');
   const [languageMessage, setLanguageMessage] = useState('');
+
+  const t = useMemo(() => {
+    const lang = (currentLanguage in translations ? currentLanguage : 'fr') as SupportedLanguage;
+    return translations[lang];
+  }, [currentLanguage]);
 
   const fullName = useMemo(() => {
     return `${firstName} ${lastName}`.trim();
@@ -429,6 +444,11 @@ export default function TelegramMiniApp() {
 
     if (nextScreen === 'balance') {
       await loadBalance();
+    }
+
+    if (nextScreen === 'withdraw') {
+      await loadBalance();
+      await loadWithdrawalInfo();
     }
 
     if (nextScreen === 'tasks') {
@@ -1061,6 +1081,81 @@ export default function TelegramMiniApp() {
     </section>
   );
 
+  const loadWithdrawalInfo = async () => {
+    if (!userId) return;
+    try {
+      const res = await fetch(`/api/user/${userId}/withdrawal-info`);
+      if (res.ok) {
+        const info = await res.json();
+        setSavedUsdtAddress(info.usdtAddress || '');
+        setSavedBinanceId(info.binanceId || '');
+        setEditUsdtAddress(info.usdtAddress || '');
+        setEditBinanceId(info.binanceId || '');
+
+        if (withdrawMethod === 'USDT' && info.usdtAddress && !withdrawDestination) {
+          setWithdrawDestination(info.usdtAddress);
+        } else if (withdrawMethod === 'Binance' && info.binanceId && !withdrawDestination) {
+          setWithdrawDestination(info.binanceId);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not load user withdrawal info:', err);
+    }
+  };
+
+  const handleSaveWithdrawalInfo = async () => {
+    if (!userId) {
+      setAddressSaveMessage('❌ Utilisateur non identifié');
+      return;
+    }
+    setSavingAddresses(true);
+    setAddressSaveMessage('');
+    try {
+      const res = await fetch(`/api/user/${userId}/withdrawal-info`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usdtAddress: editUsdtAddress.trim(),
+          binanceId: editBinanceId.trim()
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        haptic();
+        setSavedUsdtAddress(data.usdtAddress || '');
+        setSavedBinanceId(data.binanceId || '');
+        setAddressSaveMessage('✅ ' + (t.withdraw.infoSavedNotice || 'Coordonnées enregistrées avec succès !'));
+        setIsEditingAddresses(false);
+        if (withdrawMethod === 'USDT' && data.usdtAddress) {
+          setWithdrawDestination(data.usdtAddress);
+        } else if (withdrawMethod === 'Binance' && data.binanceId) {
+          setWithdrawDestination(data.binanceId);
+        }
+        setTimeout(() => setAddressSaveMessage(''), 3500);
+      } else {
+        setAddressSaveMessage('❌ Échec de l’enregistrement');
+      }
+    } catch (err: any) {
+      setAddressSaveMessage(`❌ Erreur: ${err.message}`);
+    } finally {
+      setSavingAddresses(false);
+    }
+  };
+
+  const selectWithdrawMethod = (method: 'USDT' | 'Binance') => {
+    haptic();
+    setWithdrawMethod(method);
+    if (method === 'USDT') {
+      if (savedUsdtAddress) {
+        setWithdrawDestination(savedUsdtAddress);
+      }
+    } else {
+      if (savedBinanceId) {
+        setWithdrawDestination(savedBinanceId);
+      }
+    }
+  };
+
   const handleWithdrawSubmit = async () => {
     if (!userId) {
       setWithdrawMessage('Erreur: Identifiant Telegram introuvable');
@@ -1068,13 +1163,22 @@ export default function TelegramMiniApp() {
     }
     const amt = parseFloat(withdrawAmount);
     if (isNaN(amt) || amt < 1.0) {
-      setWithdrawMessage('Le montant minimum de retrait est de $1.00 USD');
+      setWithdrawMessage(t.withdraw.minAmount || 'Le montant minimum de retrait est de $1.00 USD');
+      return;
+    }
+    if ((data?.wallet?.balance || 0) < amt) {
+      setWithdrawMessage(t.withdraw.insufficientBalance || 'Solde disponible insuffisant');
       return;
     }
     if (!withdrawDestination.trim()) {
-      setWithdrawMessage('Veuillez renseigner votre numéro ou adresse de réception');
+      setWithdrawMessage(
+        withdrawMethod === 'USDT'
+          ? 'Veuillez saisir ou renseigner votre adresse USDT (TRC-20)'
+          : 'Veuillez saisir ou renseigner votre Binance ID'
+      );
       return;
     }
+
     setWithdrawLoading(true);
     setWithdrawMessage('');
     try {
@@ -1091,9 +1195,9 @@ export default function TelegramMiniApp() {
       const json = await res.json();
       if (res.ok && json.success) {
         haptic();
-        setWithdrawMessage('✅ Demande de retrait envoyée avec succès! Traitement sous 24-48h.');
-        setWithdrawDestination('');
+        setWithdrawMessage('✅ ' + (t.withdraw.successNotice || 'Demande de retrait envoyée avec succès! Traitement sous 24-48h.'));
         loadBalance();
+        loadWithdrawalInfo();
       } else {
         setWithdrawMessage(`❌ Erreur: ${json.message || 'Échec du retrait'}`);
       }
@@ -1105,7 +1209,7 @@ export default function TelegramMiniApp() {
   };
 
   const handleLanguageChange = async (lang: string) => {
-    setCurrentLanguage(lang);
+    setCurrentLanguage(lang as SupportedLanguage);
     if (userId) {
       try {
         await fetch(`/api/user/${userId}/language`, {
@@ -1128,26 +1232,197 @@ export default function TelegramMiniApp() {
       <div className="tm-screen-title">
         <span>🏦</span>
         <div>
-          <h2>Demande de Retrait</h2>
-          <p>Seuil minimum: $1.00 USD</p>
+          <h2>{t.withdraw.title}</h2>
+          <p>{t.wallet.minWithdrawalNotice}</p>
         </div>
       </div>
 
-      <div className="tm-card tm-task-form">
+      {/* Profile & Available Balance */}
+      <div className="tm-card tm-task-form" style={{ marginBottom: '14px' }}>
         <div className="tm-profile-box">
           <div>
-            <small>SOLDE DISPONIBLE</small>
+            <small>{t.wallet.availableBalance.toUpperCase()}</small>
             <strong>${(data?.wallet?.balance || 0).toFixed(2)} USD</strong>
           </div>
           <button
             type="button"
-            onClick={() => setWithdrawAmount(String(data?.wallet?.balance || 1))}
+            onClick={() => {
+              haptic();
+              setWithdrawAmount(String((data?.wallet?.balance || 1).toFixed(2)));
+            }}
           >
             Max
           </button>
         </div>
+      </div>
 
-        <label>Montant (USD)</label>
+      {/* Saved Withdrawal Addresses Card (USDT & Binance ONLY) */}
+      <div className="tm-card" style={{ marginBottom: '14px', background: '#0f172a', border: '1px solid #1e293b' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#e2e8f0', margin: 0 }}>
+            💼 {t.withdraw.savedAddressesTitle}
+          </h3>
+          {!isEditingAddresses && (
+            <button
+              type="button"
+              onClick={() => {
+                haptic();
+                setEditUsdtAddress(savedUsdtAddress);
+                setEditBinanceId(savedBinanceId);
+                setIsEditingAddresses(true);
+              }}
+              style={{
+                fontSize: '12px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                background: '#1e293b',
+                color: '#38bdf8',
+                border: '1px solid #334155',
+                cursor: 'pointer'
+              }}
+            >
+              ✏️ Modifier
+            </button>
+          )}
+        </div>
+
+        {!isEditingAddresses ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px' }}>
+            <div style={{ background: '#1e293b', padding: '8px 12px', borderRadius: '6px' }}>
+              <span style={{ color: '#94a3b8', display: 'block', fontSize: '11px', marginBottom: '2px' }}>
+                🪙 {t.withdraw.usdtAddressLabel}
+              </span>
+              {savedUsdtAddress ? (
+                <code style={{ color: '#38bdf8', fontSize: '12px', wordBreak: 'break-all' }}>{savedUsdtAddress}</code>
+              ) : (
+                <span style={{ color: '#fbbf24', fontStyle: 'italic', fontSize: '12px' }}>Non enregistrée</span>
+              )}
+            </div>
+
+            <div style={{ background: '#1e293b', padding: '8px 12px', borderRadius: '6px' }}>
+              <span style={{ color: '#94a3b8', display: 'block', fontSize: '11px', marginBottom: '2px' }}>
+                🟡 {t.withdraw.binanceIdLabel}
+              </span>
+              {savedBinanceId ? (
+                <code style={{ color: '#facc15', fontSize: '12px' }}>{savedBinanceId}</code>
+              ) : (
+                <span style={{ color: '#fbbf24', fontStyle: 'italic', fontSize: '12px' }}>Non enregistré</span>
+              )}
+            </div>
+
+            {(!savedUsdtAddress && !savedBinanceId) && (
+              <button
+                type="button"
+                onClick={() => {
+                  haptic();
+                  setIsEditingAddresses(true);
+                }}
+                style={{
+                  marginTop: '4px',
+                  padding: '8px',
+                  borderRadius: '6px',
+                  background: '#2563eb',
+                  color: '#fff',
+                  border: 'none',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                ➕ {t.withdraw.saveInfoButton}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div>
+              <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+                🪙 {t.withdraw.usdtAddressLabel} (Tron / TRC-20)
+              </label>
+              <input
+                type="text"
+                value={editUsdtAddress}
+                onChange={(e) => setEditUsdtAddress(e.target.value)}
+                placeholder="Ex: TLyqzVGLV1zg... (TRC-20)"
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#fff',
+                  fontSize: '13px'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+                🟡 {t.withdraw.binanceIdLabel} (UID ou Pay ID)
+              </label>
+              <input
+                type="text"
+                value={editBinanceId}
+                onChange={(e) => setEditBinanceId(e.target.value)}
+                placeholder="Ex: 284918274"
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  color: '#fff',
+                  fontSize: '13px'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+              <button
+                type="button"
+                disabled={savingAddresses}
+                onClick={handleSaveWithdrawalInfo}
+                style={{
+                  flex: 1,
+                  padding: '8px',
+                  borderRadius: '6px',
+                  background: '#16a34a',
+                  color: '#fff',
+                  border: 'none',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                {savingAddresses ? 'Sauvegarde...' : '💾 Sauvegarder'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEditingAddresses(false)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: '6px',
+                  background: '#334155',
+                  color: '#cbd5e1',
+                  border: 'none',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
+
+        {addressSaveMessage && (
+          <div style={{ marginTop: '8px', fontSize: '12px', color: '#38bdf8' }}>
+            {addressSaveMessage}
+          </div>
+        )}
+      </div>
+
+      {/* Main Withdrawal Form */}
+      <div className="tm-card tm-task-form">
+        <label>{t.withdraw.amount}</label>
         <input
           type="number"
           step="0.1"
@@ -1157,41 +1432,73 @@ export default function TelegramMiniApp() {
           placeholder="Montant en USD (min 1.00)"
         />
 
-        <label>Méthode de paiement</label>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+        <label>{t.withdraw.method}</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
           {[
-            { id: 'MVola', label: '🇲🇬 MVola' },
-            { id: 'Orange Money', label: '🍊 Orange' },
-            { id: 'Airtel Money', label: '🔴 Airtel' },
-            { id: 'USDT (TRC20)', label: '₮ USDT TRC20' }
+            { id: 'USDT' as const, label: '🪙 USDT (TRC-20)', sub: 'Réseau TRC-20' },
+            { id: 'Binance' as const, label: '🟡 Binance ID', sub: 'UID / Pay ID' }
           ].map((m) => (
             <button
               key={m.id}
               type="button"
-              onClick={() => {
-                haptic();
-                setWithdrawMethod(m.id);
-              }}
+              onClick={() => selectWithdrawMethod(m.id)}
               style={{
-                padding: '10px',
+                padding: '12px 8px',
                 borderRadius: '8px',
-                border: withdrawMethod === m.id ? '2px solid #2563eb' : '1px solid #334155',
+                border: withdrawMethod === m.id ? '2px solid #38bdf8' : '1px solid #334155',
                 background: withdrawMethod === m.id ? '#1e293b' : '#0f172a',
                 color: '#fff',
                 fontSize: '13px',
-                cursor: 'pointer'
+                fontWeight: withdrawMethod === m.id ? 'bold' : 'normal',
+                cursor: 'pointer',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '2px',
+                alignItems: 'center'
               }}
             >
-              {m.label}
+              <span>{m.label}</span>
+              <small style={{ fontSize: '10px', color: '#94a3b8' }}>{m.sub}</small>
             </button>
           ))}
         </div>
 
-        <label>Numéro ou Adresse de réception</label>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <label style={{ margin: 0 }}>
+            {withdrawMethod === 'USDT' ? t.withdraw.usdtAddressLabel : t.withdraw.binanceIdLabel}
+          </label>
+          {((withdrawMethod === 'USDT' && savedUsdtAddress && withdrawDestination !== savedUsdtAddress) ||
+            (withdrawMethod === 'Binance' && savedBinanceId && withdrawDestination !== savedBinanceId)) && (
+            <button
+              type="button"
+              onClick={() => {
+                haptic();
+                if (withdrawMethod === 'USDT') setWithdrawDestination(savedUsdtAddress);
+                else setWithdrawDestination(savedBinanceId);
+              }}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#38bdf8',
+                fontSize: '11px',
+                cursor: 'pointer',
+                textDecoration: 'underline'
+              }}
+            >
+              Utiliser adresse enregistrée
+            </button>
+          )}
+        </div>
+
         <input
           value={withdrawDestination}
           onChange={(e) => setWithdrawDestination(e.target.value)}
-          placeholder={withdrawMethod.includes('USDT') ? 'Adresse TRC20 (T...)' : 'Numéro de téléphone (ex: 034...)'}
+          placeholder={
+            withdrawMethod === 'USDT'
+              ? 'Adresse TRC-20 commençant par T...'
+              : 'Binance UID ou Pay ID (ex: 284918274)'
+          }
         />
 
         <button

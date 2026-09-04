@@ -37,6 +37,12 @@ export interface TranslationDict {
     selectMethod: string;
     destinationPlaceholder: string;
     pendingRequests: string;
+    savedAddressesTitle: string;
+    usdtAddressLabel: string;
+    binanceIdLabel: string;
+    saveInfoButton: string;
+    infoSavedNotice: string;
+    noSavedInfoNotice: string;
   };
   tasks: {
     title: string;
@@ -133,14 +139,20 @@ export const translations: Record<SupportedLanguage, TranslationDict> = {
       title: 'Demande de Retrait',
       amount: 'Montant ($ USD)',
       method: 'Moyen de paiement',
-      destination: 'Numéro / Compte de réception',
+      destination: 'Adresse ou Identifiant de Réception',
       submit: 'Confirmer la demande',
       minAmount: 'Le montant minimum est de $1.00 USD',
       insufficientBalance: 'Solde disponible insuffisant',
       successNotice: 'Demande de retrait enregistrée avec succès !',
-      selectMethod: 'Sélectionner un moyen de paiement',
-      destinationPlaceholder: 'Ex: 034 00 000 00 ou email PayPal ou IBAN',
-      pendingRequests: 'Demandes en cours'
+      selectMethod: 'Sélectionner un moyen de paiement (USDT ou Binance)',
+      destinationPlaceholder: 'Adresse USDT TRC-20 ou Binance ID',
+      pendingRequests: 'Demandes en cours',
+      savedAddressesTitle: 'Coordonnées de Retrait Enregistrées',
+      usdtAddressLabel: 'Adresse USDT (TRC-20)',
+      binanceIdLabel: 'Binance ID (Pay ID)',
+      saveInfoButton: 'Enregistrer mes coordonnées',
+      infoSavedNotice: 'Coordonnées de paiement enregistrées avec succès',
+      noSavedInfoNotice: 'Veuillez enregistrer votre adresse USDT ou Binance ID'
     },
     tasks: {
       title: 'Nouvelle Tâche',
@@ -235,14 +247,20 @@ export const translations: Record<SupportedLanguage, TranslationDict> = {
       title: 'Withdrawal Request',
       amount: 'Amount ($ USD)',
       method: 'Payment Method',
-      destination: 'Receiving Account / Number',
+      destination: 'Receiving Address / ID',
       submit: 'Confirm Request',
       minAmount: 'Minimum withdrawal amount is $1.00 USD',
       insufficientBalance: 'Insufficient available balance',
       successNotice: 'Withdrawal request submitted successfully!',
-      selectMethod: 'Select payment method',
-      destinationPlaceholder: 'e.g. Phone number, PayPal email, or Bank IBAN',
-      pendingRequests: 'Pending Requests'
+      selectMethod: 'Select payment method (USDT or Binance)',
+      destinationPlaceholder: 'USDT TRC-20 Address or Binance ID',
+      pendingRequests: 'Pending Requests',
+      savedAddressesTitle: 'Saved Withdrawal Addresses',
+      usdtAddressLabel: 'USDT Address (TRC-20)',
+      binanceIdLabel: 'Binance ID (Pay ID)',
+      saveInfoButton: 'Save Payment Details',
+      infoSavedNotice: 'Payment details saved successfully',
+      noSavedInfoNotice: 'Please save your USDT address or Binance ID'
     },
     tasks: {
       title: 'New Task',
@@ -337,14 +355,20 @@ export const translations: Record<SupportedLanguage, TranslationDict> = {
       title: 'Fangatahana Fanalana Vola',
       amount: 'Isan\'ny vola ($ USD)',
       method: 'Fomba fandoavana',
-      destination: 'Laharana / Kaonty handraisana azy',
+      destination: 'Adiresy na Kaonty handraisana azy',
       submit: 'Alefa ny fangatahana',
       minAmount: 'Farafahakeliny $1.00 USD ny vola azo alaina',
       insufficientBalance: 'Tsy ampy ny vola azo alaina',
       successNotice: 'Voaray soa aman-tsara ny fangatahanao !',
-      selectMethod: 'Safidio ny fomba handraisana vola',
-      destinationPlaceholder: 'Ohatra : 034 00 000 00 na email PayPal',
-      pendingRequests: 'Fangatahana miandry'
+      selectMethod: 'Safidio ny fomba handraisana vola (USDT na Binance)',
+      destinationPlaceholder: 'Adiresy USDT TRC-20 na Binance ID',
+      pendingRequests: 'Fangatahana miandry',
+      savedAddressesTitle: 'Fampahalalana Fanalana Vola Voatahiry',
+      usdtAddressLabel: 'Adiresy USDT (TRC-20)',
+      binanceIdLabel: 'Binance ID (Pay ID)',
+      saveInfoButton: 'Tehirizo ny adiresiko',
+      infoSavedNotice: 'Voatahiry soa aman-tsara ny fampahalalana',
+      noSavedInfoNotice: 'Azafady ampidiro ny adiresy USDT na Binance ID-nao'
     },
     tasks: {
       title: 'Hanao Asa Vaovao',
