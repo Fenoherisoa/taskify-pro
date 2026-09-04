@@ -1,42 +1,66 @@
 /**
- * Taskify Pro - Telegram Bot (@TaskifyProBot)
+ * ============================================================
+ * TASKIFY PRO - TELEGRAM BOT
+ * ============================================================
+ *
+ * Persistent architecture:
+ *
+ * Telegram Bot
+ *      |
+ *      v
+ * PostgreSQL  <---- PRIMARY DATABASE
+ *      |
+ *      +---- Google Sheets Sync
  *
  * Workflow:
- *   SUBMISSION
- *       ↓
- *   PENDING
- *       ↓
- *   ADMIN VALIDATION
- *       ├── VALIDATED → reward credited
- *       └── REJECTED  → no reward
  *
- * Google Sheets:
- *   New task       → action: insert_task
- *   Admin decision → action: update_validation
+ * SUBMISSION
+ *     ↓
+ * PENDING
+ *     ↓
+ * ADMIN VALIDATION
+ *     ├── VALIDATED → reward credited
+ *     └── REJECTED  → no reward
  *
- * Environment:
- *   TELEGRAM_BOT_TOKEN
- *   GOOGLE_SHEET_WEBHOOK_URL
- *   ADMIN_TELEGRAM_IDS=123456789,987654321
- *   DEFAULT_BOT_PASSWORD
- *   PLATFORM_NAME
- *   PORT
+ * IMPORTANT:
+ * - PostgreSQL is the persistent source of truth.
+ * - Google Sheets remains enabled as synchronization.
+ * - No balance is credited before admin validation.
+ * - Pending tasks survive Render redeploy.
+ * - Validated tasks survive Render redeploy.
+ * - Rejected tasks survive Render redeploy.
+ *
+ * Required ENV:
+ *
+ * TELEGRAM_BOT_TOKEN=
+ * DATABASE_URL=
+ * GOOGLE_SHEET_WEBHOOK_URL=
+ * ADMIN_TELEGRAM_IDS=123456789,987654321
+ * DEFAULT_BOT_PASSWORD=
+ * PLATFORM_NAME=Taskify Pro
+ * PORT=3000
+ *
+ * ============================================================
  */
 
 require('dotenv').config();
 
 const { Telegraf, Markup } = require('telegraf');
+const { Pool } = require('pg');
 const http = require('http');
 
-// ====================================================
+// ============================================================
 // 1. CONFIGURATION
-// ====================================================
+// ============================================================
 
 const WORKER_WEB_APP_URL =
   'https://taskify-pro-bf2q.onrender.com';
 
 const TELEGRAM_BOT_TOKEN =
   process.env.TELEGRAM_BOT_TOKEN;
+
+const DATABASE_URL =
+  process.env.DATABASE_URL || '';
 
 const GOOGLE_SHEET_WEBHOOK_URL =
   process.env.GOOGLE_SHEET_WEBHOOK_URL || '';
@@ -59,62 +83,111 @@ const REFERRAL_COMMISSION_EUR = 0.25;
 
 const MIN_WITHDRAWAL_EUR = 10.00;
 
-// ====================================================
-// ADMIN TELEGRAM IDS
-// ====================================================
+// ============================================================
+// ADMIN IDS
+// ============================================================
 
-const ADMIN_TELEGRAM_IDS = String(
-  process.env.ADMIN_TELEGRAM_IDS || ''
-)
-  .split(',')
-  .map(id => id.trim())
-  .filter(Boolean);
+const ADMIN_TELEGRAM_IDS =
+  String(process.env.ADMIN_TELEGRAM_IDS || '')
+    .split(',')
+    .map(id => id.trim())
+    .filter(Boolean);
 
 function isAdmin(userId) {
-  return ADMIN_TELEGRAM_IDS.includes(String(userId));
+  return ADMIN_TELEGRAM_IDS.includes(
+    String(userId)
+  );
 }
 
-// ====================================================
-// TOKEN CHECK
-// ====================================================
+// ============================================================
+// TOKEN / DATABASE CHECK
+// ============================================================
 
 if (!TELEGRAM_BOT_TOKEN) {
   console.error(
-    '❌ CRITICAL ERROR: TELEGRAM_BOT_TOKEN is missing.'
+    '❌ TELEGRAM_BOT_TOKEN manquant.'
   );
 
   process.exit(1);
 }
 
-const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+if (!DATABASE_URL) {
+  console.error(
+    '❌ DATABASE_URL manquant.'
+  );
 
-// ====================================================
+  process.exit(1);
+}
+
+// ============================================================
+// POSTGRESQL
+// ============================================================
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+
+  ssl: DATABASE_URL
+    ? { rejectUnauthorized: false }
+    : undefined
+});
+
+pool.on('error', error => {
+  console.error(
+    '❌ PostgreSQL pool error:',
+    error.message
+  );
+});
+
+async function dbQuery(text, params = []) {
+  const result = await pool.query(
+    text,
+    params
+  );
+
+  return result;
+}
+
+// ============================================================
+// TELEGRAM BOT
+// ============================================================
+
+const bot =
+  new Telegraf(
+    TELEGRAM_BOT_TOKEN
+  );
+
+// ============================================================
 // 2. KEYBOARDS
-// ====================================================
+// ============================================================
 
-const WORKER_MAIN_KEYBOARD = Markup.keyboard([
-  [
-    Markup.button.webApp(
-      '🚀 Open Dashboard',
-      WORKER_WEB_APP_URL
-    )
-  ],
-  [
-    '💰 Solde',
-    '📋 Tâches'
-  ],
-  [
-    '🏦 Retrait',
-    '📞 Support'
-  ],
-  [
-    '👥 Parrainages',
-    '🏆 Classement'
-  ],
-  [
-    '🪩 Langue'
-  ]
-]).resize();
+const WORKER_MAIN_KEYBOARD =
+  Markup.keyboard([
+    [
+      Markup.button.webApp(
+        '🚀 Open Dashboard',
+        WORKER_WEB_APP_URL
+      )
+    ],
+
+    [
+      '💰 Solde',
+      '📋 Tâches'
+    ],
+
+    [
+      '🏦 Retrait',
+      '📞 Support'
+    ],
+
+    [
+      '👥 Parrainages',
+      '🏆 Classement'
+    ],
+
+    [
+      '🪩 Langue'
+    ]
+  ]).resize();
 
 const MAIN_REPLY_KEYBOARD =
   Markup.keyboard([
@@ -122,22 +195,25 @@ const MAIN_REPLY_KEYBOARD =
       '💰 Solde',
       '📋 Tâches'
     ],
+
     [
       '🏦 Retrait',
       '📞 Support'
     ],
+
     [
       '👥 Parrainages',
       '🏆 Classement'
     ],
+
     [
       '🪩 Langue'
     ]
   ]).resize();
 
-// ====================================================
+// ============================================================
 // 3. DATA
-// ====================================================
+// ============================================================
 
 const FIRST_NAMES = [
   'Alexandre',
@@ -225,22 +301,21 @@ const LAST_NAMES = [
   'Nicolas'
 ];
 
-// ====================================================
-// RANDOM IDENTITY
-// ====================================================
-
 function getRandomIdentity() {
+
   const firstName =
     FIRST_NAMES[
       Math.floor(
-        Math.random() * FIRST_NAMES.length
+        Math.random() *
+        FIRST_NAMES.length
       )
     ];
 
   const lastName =
     LAST_NAMES[
       Math.floor(
-        Math.random() * LAST_NAMES.length
+        Math.random() *
+        LAST_NAMES.length
       )
     ];
 
@@ -250,104 +325,440 @@ function getRandomIdentity() {
   };
 }
 
-// ====================================================
-// MEMORY STORAGE
-// ====================================================
+// ============================================================
+// 4. SESSION CACHE
+// ============================================================
+//
+// Session temporaire uniquement.
+// Les données importantes sont sauvegardées PostgreSQL.
+// Une session Telegram peut être perdue après restart,
+// mais les users/tasks/balances ne le seront pas.
+//
 
 const userSessions = {};
-const userLedger = {};
 
-// ====================================================
-// USER DATA
-// ====================================================
+// ============================================================
+// 5. DATABASE INITIALIZATION
+// ============================================================
 
-function getUserData(
+async function initializeBotDatabase() {
+
+  console.log(
+    '🗄️ Vérification PostgreSQL...'
+  );
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      telegram_user_id TEXT UNIQUE NOT NULL,
+      telegram_username TEXT,
+      first_name TEXT,
+      last_name TEXT,
+      language TEXT DEFAULT 'fr',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS wallets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER UNIQUE NOT NULL
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+      balance NUMERIC(12,4) NOT NULL DEFAULT 0,
+      total_earned NUMERIC(12,4) NOT NULL DEFAULT 0,
+      total_withdrawn NUMERIC(12,4) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id SERIAL PRIMARY KEY,
+      task_id TEXT UNIQUE NOT NULL,
+
+      telegram_user_id TEXT,
+      task_type TEXT,
+
+      status TEXT NOT NULL DEFAULT 'pending',
+
+      uid TEXT,
+      first_name TEXT,
+      last_name TEXT,
+      password TEXT,
+      cookies TEXT,
+
+      reward_usd NUMERIC(12,4) DEFAULT 0,
+
+      validation_status TEXT DEFAULT 'pending',
+      validation_reason TEXT,
+      validated_at TIMESTAMPTZ,
+      validated_by INTEGER,
+
+      account_created BOOLEAN NOT NULL DEFAULT FALSE,
+      account_created_at TIMESTAMPTZ,
+
+      reward_paid BOOLEAN NOT NULL DEFAULT FALSE,
+      reward_paid_at TIMESTAMPTZ,
+
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      completed_at TIMESTAMPTZ
+    );
+  `);
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS transactions (
+      id SERIAL PRIMARY KEY,
+
+      user_id INTEGER NOT NULL
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+
+      task_id TEXT,
+
+      type TEXT NOT NULL,
+
+      amount NUMERIC(12,4) NOT NULL,
+
+      balance_before NUMERIC(12,4) NOT NULL,
+
+      balance_after NUMERIC(12,4) NOT NULL,
+
+      description TEXT,
+
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS withdrawals (
+      id SERIAL PRIMARY KEY,
+
+      user_id INTEGER NOT NULL
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+
+      amount NUMERIC(12,4) NOT NULL,
+
+      method TEXT,
+
+      destination TEXT,
+
+      status TEXT NOT NULL DEFAULT 'pending',
+
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+
+      processed_at TIMESTAMPTZ
+    );
+  `);
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS task_validations (
+      id SERIAL PRIMARY KEY,
+
+      task_id TEXT NOT NULL
+        REFERENCES tasks(task_id)
+        ON DELETE CASCADE,
+
+      validator_id INTEGER,
+
+      status TEXT NOT NULL DEFAULT 'pending',
+
+      reason TEXT,
+
+      validation_data JSONB DEFAULT '{}'::jsonb,
+
+      validated_at TIMESTAMPTZ,
+
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS accounts (
+      id SERIAL PRIMARY KEY,
+
+      task_id TEXT UNIQUE NOT NULL
+        REFERENCES tasks(task_id)
+        ON DELETE CASCADE,
+
+      uid TEXT NOT NULL,
+
+      first_name TEXT,
+
+      last_name TEXT,
+
+      account_status TEXT NOT NULL DEFAULT 'active',
+
+      validated_at TIMESTAMPTZ NOT NULL,
+
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS validation_reports (
+      id SERIAL PRIMARY KEY,
+
+      task_id TEXT NOT NULL
+        REFERENCES tasks(task_id)
+        ON DELETE CASCADE,
+
+      validation_id INTEGER
+        REFERENCES task_validations(id)
+        ON DELETE SET NULL,
+
+      result TEXT NOT NULL,
+
+      checks JSONB DEFAULT '{}'::jsonb,
+
+      notes TEXT,
+
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  // ----------------------------------------------------------
+  // MIGRATIONS
+  // ----------------------------------------------------------
+
+  await dbQuery(`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS referral_by TEXT;
+
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS referrals_count INTEGER
+      NOT NULL DEFAULT 0;
+
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS referral_earnings
+      NUMERIC(12,4) NOT NULL DEFAULT 0;
+  `);
+
+  await dbQuery(`
+    ALTER TABLE tasks
+      ADD COLUMN IF NOT EXISTS validation_status TEXT
+      DEFAULT 'pending';
+
+    ALTER TABLE tasks
+      ADD COLUMN IF NOT EXISTS validation_reason TEXT;
+
+    ALTER TABLE tasks
+      ADD COLUMN IF NOT EXISTS validated_at TIMESTAMPTZ;
+
+    ALTER TABLE tasks
+      ADD COLUMN IF NOT EXISTS validated_by INTEGER;
+
+    ALTER TABLE tasks
+      ADD COLUMN IF NOT EXISTS account_created BOOLEAN
+      NOT NULL DEFAULT FALSE;
+
+    ALTER TABLE tasks
+      ADD COLUMN IF NOT EXISTS account_created_at TIMESTAMPTZ;
+
+    ALTER TABLE tasks
+      ADD COLUMN IF NOT EXISTS reward_paid BOOLEAN
+      NOT NULL DEFAULT FALSE;
+
+    ALTER TABLE tasks
+      ADD COLUMN IF NOT EXISTS reward_paid_at TIMESTAMPTZ;
+  `);
+
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS
+      idx_tasks_status
+      ON tasks(status);
+
+    CREATE INDEX IF NOT EXISTS
+      idx_tasks_validation_status
+      ON tasks(validation_status);
+
+    CREATE INDEX IF NOT EXISTS
+      idx_tasks_telegram_user_id
+      ON tasks(telegram_user_id);
+
+    CREATE INDEX IF NOT EXISTS
+      idx_task_validations_task_id
+      ON task_validations(task_id);
+
+    CREATE INDEX IF NOT EXISTS
+      idx_task_validations_status
+      ON task_validations(status);
+  `);
+
+  console.log(
+    '✅ PostgreSQL prêt.'
+  );
+}
+
+// ============================================================
+// 6. USER DATABASE FUNCTIONS
+// ============================================================
+
+async function getUserData(
   userId,
   username,
   firstName
 ) {
-  if (!userLedger[userId]) {
-    userLedger[userId] = {
-      userId: String(userId),
 
-      username:
-        username ||
-        'utilisateur',
+  const telegramId =
+    String(userId);
 
-      firstName:
-        firstName ||
-        'Opérateur',
+  let result =
+    await dbQuery(
+      `
+      SELECT
+        u.*,
 
-      tasksCompleted: 0,
+        COALESCE(
+          w.balance,
+          0
+        ) AS balance,
 
-      balance: 0.00,
+        COALESCE(
+          w.total_earned,
+          0
+        ) AS total_earned,
 
-      pendingBalance: 0.00,
+        COALESCE(
+          w.total_withdrawn,
+          0
+        ) AS total_withdrawn
 
-      pendingTasks: [],
+      FROM users u
 
-      referralsCount: 0,
+      LEFT JOIN wallets w
+        ON w.user_id = u.id
 
-      referralEarnings: 0.00,
+      WHERE u.telegram_user_id = $1
 
-      referredBy: null,
+      LIMIT 1
+      `,
+      [telegramId]
+    );
 
-      language: 'fr',
+  if (result.rows.length === 0) {
 
-      joinedAt:
-        new Date().toISOString()
+    result =
+      await dbQuery(
+        `
+        INSERT INTO users (
+          telegram_user_id,
+          telegram_username,
+          first_name
+        )
+
+        VALUES ($1,$2,$3)
+
+        RETURNING *
+        `,
+        [
+          telegramId,
+          username || '',
+          firstName || 'Opérateur'
+        ]
+      );
+
+    const user =
+      result.rows[0];
+
+    await dbQuery(
+      `
+      INSERT INTO wallets (
+        user_id
+      )
+
+      VALUES ($1)
+
+      ON CONFLICT (user_id)
+      DO NOTHING
+      `,
+      [user.id]
+    );
+
+    return {
+      ...user,
+      balance: 0,
+      total_earned: 0,
+      total_withdrawn: 0
     };
   }
 
-  const user = userLedger[userId];
+  const user =
+    result.rows[0];
 
-  if (!Array.isArray(user.pendingTasks)) {
-    user.pendingTasks = [];
-  }
+  // Update Telegram profile
+  await dbQuery(
+    `
+    UPDATE users
+
+    SET
+      telegram_username =
+        COALESCE($2, telegram_username),
+
+      first_name =
+        COALESCE($3, first_name),
+
+      updated_at = NOW()
+
+    WHERE telegram_user_id = $1
+    `,
+    [
+      telegramId,
+      username || null,
+      firstName || null
+    ]
+  );
 
   return user;
 }
 
-// ====================================================
-// FIND PENDING TASK
-// ====================================================
+// ============================================================
+// REFRESH USER
+// ============================================================
 
-function findPendingTask(taskId) {
-  const wantedId = String(taskId);
+async function refreshUser(
+  userId
+) {
 
-  for (
-    const userId of Object.keys(userLedger)
-  ) {
-    const user = userLedger[userId];
+  const result =
+    await dbQuery(
+      `
+      SELECT
+        u.*,
 
-    if (
-      !Array.isArray(user.pendingTasks)
-    ) {
-      continue;
-    }
+        COALESCE(
+          w.balance,
+          0
+        ) AS balance,
 
-    const taskIndex =
-      user.pendingTasks.findIndex(
-        task =>
-          String(task.id) === wantedId
-      );
+        COALESCE(
+          w.total_earned,
+          0
+        ) AS total_earned,
 
-    if (taskIndex !== -1) {
-      return {
-        userId,
-        user,
-        task: user.pendingTasks[taskIndex],
-        taskIndex
-      };
-    }
-  }
+        COALESCE(
+          w.total_withdrawn,
+          0
+        ) AS total_withdrawn
 
-  return null;
+      FROM users u
+
+      LEFT JOIN wallets w
+        ON w.user_id = u.id
+
+      WHERE u.telegram_user_id = $1
+      `,
+      [String(userId)]
+    );
+
+  return result.rows[0] || null;
 }
 
-// ====================================================
-// 4. TRANSLATIONS
-// ====================================================
+// ============================================================
+// 7. TRANSLATIONS
+// ============================================================
 
 const TRANSLATIONS = {
 
@@ -361,7 +772,7 @@ const TRANSLATIONS = {
 
     choose_task:
       `📋 *Menu des Tâches Disponibles*\n\n` +
-      `Sélectionnez une catégorie de tâche à effectuer :`,
+      `Sélectionnez une catégorie de tâche à effectuer.`,
 
     balance_title:
       `💰 *Votre Solde & Activité*`,
@@ -379,23 +790,20 @@ const TRANSLATIONS = {
       `🏆 *Classement des Meilleurs Opérateurs*`,
 
     lang_title:
-      `🪩 *Sélection de la Langue*`,
-
-    lang_selected:
-      `✅ Langue configurée en **Français**.`
+      `🪩 *Sélection de la Langue*`
   },
 
   mg: {
 
     welcome:
       `👋 *Tongasoa eto amin'ny ${PLATFORM_NAME} (@TaskifyProBot) !*\n\n` +
-      `Sehatra fanaovana asa sy fandefasana tâche mahazo vola.\n\n` +
-      `Ampiasao ny bokotra eo ambany hanombohana ny asa, hijerena ny solde, na hangatahana retrait.\n\n` +
-      `👉 Tsindrio ny *📋 Tâches* hanombohana.`,
+      `Sehatra fitantanana asa sy fandefasana tâche.\n\n` +
+      `Ampiasao ny menu eto ambany hijerena asa, solde na retrait.\n\n` +
+      `👉 Tsindrio *📋 Tâches* hanombohana.`,
 
     choose_task:
-      `📋 *Safidy ny Asa Azo Atao*\n\n` +
-      `Fidio ny sokajin'asa tianao hatao :`,
+      `📋 *Safidy ny Asa*\n\n` +
+      `Fidio ny asa tianao hatao.`,
 
     balance_title:
       `💰 *Ny Solde sy ny Asanao*`,
@@ -404,19 +812,16 @@ const TRANSLATIONS = {
       `🏦 *Fangatahana Retrait*`,
 
     support_title:
-      `📞 *Fanampiana & Fifandraisana*`,
+      `📞 *Fanampiana & Support*`,
 
     referral_title:
-      `👥 *Fandaharana Parrainage*`,
+      `👥 *Parrainage*`,
 
     leaderboard_title:
-      `🏆 *Laharana Voalohany*`,
+      `🏆 *Classement*`,
 
     lang_title:
-      `🪩 *Fisafidianana Fiteny*`,
-
-    lang_selected:
-      `✅ Voafaritra amin'ny teny **Malagasy** ny bot.`
+      `🪩 *Fisafidianana Fiteny*`
   },
 
   en: {
@@ -424,39 +829,36 @@ const TRANSLATIONS = {
     welcome:
       `👋 *Welcome to ${PLATFORM_NAME} (@TaskifyProBot)!*\n\n` +
       `Automated task management and submission platform.\n\n` +
-      `Use the menu below to start tasks, track your earnings or request withdrawals.\n\n` +
+      `Use the menu below to start tasks, track earnings or request withdrawals.\n\n` +
       `👉 Click *📋 Tâches* to begin.`,
 
     choose_task:
-      `📋 *Available Tasks Menu*\n\n` +
-      `Select a task category to proceed:`,
+      `📋 *Available Tasks*\n\n` +
+      `Select a task category.`,
 
     balance_title:
-      `💰 *Your Balance & Statistics*`,
+      `💰 *Your Balance & Activity*`,
 
     withdrawal_title:
       `🏦 *Withdrawal Request*`,
 
     support_title:
-      `📞 *Support & Helpdesk*`,
+      `📞 *Support & Help*`,
 
     referral_title:
       `👥 *Referral Program*`,
 
     leaderboard_title:
-      `🏆 *Top Operators Leaderboard*`,
+      `🏆 *Leaderboard*`,
 
     lang_title:
-      `🪩 *Language Selection*`,
-
-    lang_selected:
-      `✅ Language updated to **English**.`
+      `🪩 *Language Selection*`
   }
 };
 
-// ====================================================
-// 5. GOOGLE SHEETS SYNC
-// ====================================================
+// ============================================================
+// 8. GOOGLE SHEETS SYNC
+// ============================================================
 
 async function syncToGoogleSheets(task) {
 
@@ -464,9 +866,9 @@ async function syncToGoogleSheets(task) {
     !GOOGLE_SHEET_WEBHOOK_URL ||
     !GOOGLE_SHEET_WEBHOOK_URL.startsWith('http')
   ) {
+
     console.log(
-      `[Google Sheets] Webhook non configuré. ` +
-      `Task: ${task.id}`
+      `[Google Sheets] Webhook non configuré. Task=${task.id}`
     );
 
     return {
@@ -477,20 +879,12 @@ async function syncToGoogleSheets(task) {
 
   const payload = {
 
-    /*
-     * NEW TASK:
-     *   insert_task
-     *
-     * VALIDATION:
-     *   update_validation
-     */
     action:
       task.syncAction ||
       'insert_task',
 
     id:
-      task.id ||
-      `task-${Date.now()}`,
+      task.id,
 
     timestamp:
       task.timestamp ||
@@ -499,17 +893,11 @@ async function syncToGoogleSheets(task) {
     uid:
       task.uid || '',
 
-    cookies:
-      task.cookies || '',
-
     firstName:
       task.firstName || '',
 
     lastName:
       task.lastName || '',
-
-    password:
-      task.password || '',
 
     telegramUserId:
       String(
@@ -517,16 +905,22 @@ async function syncToGoogleSheets(task) {
       ),
 
     telegramUsername:
-      task.telegramUsername ||
-      'utilisateur',
+      task.telegramUsername || '',
 
     status:
-      task.status ||
-      'pending',
+      task.status || 'pending',
 
     validation_status:
-      task.validation_status ||
-      'pending',
+      task.validation_status || 'pending',
+
+    validation_reason:
+      task.validation_reason || null,
+
+    validated_at:
+      task.validated_at || null,
+
+    validated_by:
+      task.validated_by || null,
 
     reward_amount:
       Number(
@@ -540,20 +934,7 @@ async function syncToGoogleSheets(task) {
       ),
 
     reward_paid_at:
-      task.reward_paid_at ||
-      null,
-
-    validated_at:
-      task.validated_at ||
-      null,
-
-    validated_by:
-      task.validated_by ||
-      null,
-
-    validation_reason:
-      task.validation_reason ||
-      null,
+      task.reward_paid_at || null,
 
     account_created:
       Boolean(
@@ -561,21 +942,18 @@ async function syncToGoogleSheets(task) {
       ),
 
     account_created_at:
-      task.account_created_at ||
-      null,
+      task.account_created_at || null,
+
+    taskType:
+      task.taskType || 'Facebook',
 
     notes:
       task.notes ||
-      `Enregistré via ${PLATFORM_NAME}`,
-
-    taskType:
-      task.taskType ||
-      'Facebook'
+      `Enregistré via ${PLATFORM_NAME}`
   };
 
   console.log(
-    `[Google Sheets] 📡 action=${payload.action} ` +
-    `task=${payload.id}`
+    `[Google Sheets] 📡 ${payload.action} ${payload.id}`
   );
 
   try {
@@ -607,28 +985,24 @@ async function syncToGoogleSheets(task) {
             JSON.stringify(payload),
 
           signal:
-            controller.signal,
-
-          redirect:
-            'follow'
+            controller.signal
         }
       );
 
-    clearTimeout(timeoutId);
+    clearTimeout(
+      timeoutId
+    );
 
     const responseText =
       await response.text();
 
-    const isOk =
+    if (
       response.ok ||
-      response.status < 400;
-
-    if (isOk) {
+      response.status < 400
+    ) {
 
       console.log(
-        `[Google Sheets] ✅ ` +
-        `Sync réussie: ${payload.id} ` +
-        `HTTP=${response.status}`
+        `[Google Sheets] ✅ ${payload.id}`
       );
 
       return {
@@ -641,8 +1015,7 @@ async function syncToGoogleSheets(task) {
     }
 
     console.error(
-      `[Google Sheets] ❌ HTTP ${response.status}: ` +
-      responseText.slice(0, 300)
+      `[Google Sheets] ❌ HTTP ${response.status}`
     );
 
     return {
@@ -655,25 +1028,22 @@ async function syncToGoogleSheets(task) {
 
   } catch (error) {
 
-    const errorMsg =
-      error.name === 'AbortError'
-        ? 'Timeout 15 secondes'
-        : error.message;
-
     console.error(
-      `[Google Sheets] ❌ ${errorMsg}`
+      '[Google Sheets] ❌',
+      error.message
     );
 
     return {
       success: false,
-      error: errorMsg
+      error:
+        error.message
     };
   }
 }
 
-// ====================================================
-// 6. UI RENDER
-// ====================================================
+// ============================================================
+// 9. UI RENDER
+// ============================================================
 
 async function renderScreen(
   ctx,
@@ -697,20 +1067,19 @@ async function renderScreen(
       );
     }
 
-  } catch (err) {
+  } catch (error) {
 
     if (
-      !err.message ||
-      !err.message.includes(
+      !error.message ||
+      !error.message.includes(
         'message is not modified'
       )
     ) {
+
       console.warn(
         '[UI Render]',
-        err.message
+        error.message
       );
-    } else {
-      return;
     }
   }
 
@@ -723,206 +1092,264 @@ async function renderScreen(
   );
 }
 
-// ====================================================
-// 7. /START
-// ====================================================
+// ============================================================
+// 10. START
+// ============================================================
 
-bot.start(async ctx => {
+bot.start(
+  async ctx => {
 
-  const userId =
-    String(
-      ctx.from?.id ||
-      'unknown'
-    );
+    const userId =
+      String(
+        ctx.from?.id || 'unknown'
+      );
 
-  const userFirstName =
-    ctx.from?.first_name ||
-    'Opérateur';
+    const username =
+      ctx.from?.username || '';
 
-  const username =
-    ctx.from?.username ||
-    '';
+    const firstName =
+      ctx.from?.first_name ||
+      'Opérateur';
 
-  const user =
-    getUserData(
-      userId,
-      username,
-      userFirstName
-    );
+    const user =
+      await getUserData(
+        userId,
+        username,
+        firstName
+      );
 
-  userSessions[userId] = {
-    step: 'START'
-  };
+    userSessions[userId] = {
+      step: 'START'
+    };
 
-  const startPayload =
-    ctx.message.text
-      .split(' ')[1];
+    // --------------------------------------------------------
+    // REFERRAL
+    // --------------------------------------------------------
 
-  if (
-    startPayload &&
-    startPayload.startsWith('ref_') &&
-    !user.referredBy
-  ) {
-
-    const referrerId =
-      startPayload
-        .replace('ref_', '');
+    const startPayload =
+      ctx.message.text
+        .split(' ')[1];
 
     if (
-      referrerId !== userId
+      startPayload &&
+      startPayload.startsWith('ref_')
     ) {
 
-      user.referredBy =
-        referrerId;
+      const referrerId =
+        startPayload.replace(
+          'ref_',
+          ''
+        );
 
       if (
-        userLedger[referrerId]
+        referrerId !== userId &&
+        !user.referral_by
       ) {
 
-        userLedger[
-          referrerId
-        ].referralsCount += 1;
+        await dbQuery(
+          `
+          UPDATE users
+
+          SET
+            referral_by = $1,
+            updated_at = NOW()
+
+          WHERE telegram_user_id = $2
+          `,
+          [
+            referrerId,
+            userId
+          ]
+        );
+
+        await dbQuery(
+          `
+          UPDATE users
+
+          SET
+            referrals_count =
+              referrals_count + 1,
+
+            updated_at = NOW()
+
+          WHERE telegram_user_id = $1
+          `,
+          [referrerId]
+        );
+
+        console.log(
+          `[Referral] ${userId} ← ${referrerId}`
+        );
       }
-
-      console.log(
-        `[Referral] ${userId} → ${referrerId}`
-      );
     }
+
+    const lang =
+      user.language || 'fr';
+
+    const t =
+      TRANSLATIONS[lang] ||
+      TRANSLATIONS.fr;
+
+    await ctx.reply(
+      t.welcome,
+      {
+        parse_mode: 'Markdown',
+        ...WORKER_MAIN_KEYBOARD
+      }
+    );
   }
+);
 
-  const lang =
-    user.language || 'fr';
+// ============================================================
+// HELP
+// ============================================================
 
-  const t =
-    TRANSLATIONS[lang] ||
-    TRANSLATIONS.fr;
+bot.help(
+  async ctx => {
 
-  await ctx.reply(
-    t.welcome,
-    {
-      parse_mode: 'Markdown',
-      ...WORKER_MAIN_KEYBOARD
-    }
-  );
-});
+    await ctx.reply(
 
-// ====================================================
-// 8. /HELP
-// ====================================================
+      `📌 *Guide d'utilisation - ${PLATFORM_NAME}*\n\n` +
 
-bot.help(async ctx => {
+      `1. Cliquez sur *📋 Tâches*.\n` +
 
-  await ctx.reply(
+      `2. Sélectionnez la tâche disponible.\n` +
 
-    `📌 *Guide d'utilisation - ${PLATFORM_NAME}*\n\n` +
+      `3. Suivez les instructions de soumission.\n` +
 
-    `1. Cliquez sur *📋 Tâches*.\n` +
+      `4. Envoyez votre UID lorsque demandé.\n` +
 
-    `2. Sélectionnez la tâche disponible.\n` +
+      `5. Votre soumission est d'abord enregistrée avec le statut *PENDING*.\n` +
 
-    `3. Suivez les instructions affichées par le bot.\n` +
+      `6. Un administrateur vérifie ensuite la soumission.\n` +
 
-    `4. Envoyez les informations demandées pour votre soumission.\n\n` +
+      `7. La récompense est créditée uniquement après validation.\n\n` +
 
-    `5. Votre tâche est d'abord enregistrée avec le statut *PENDING*.\n` +
+      `⚠️ Ne transmettez jamais de mot de passe personnel ni de jeton de session dans le chat.`,
 
-    `6. Un administrateur vérifie ensuite votre soumission.\n` +
+      {
+        parse_mode: 'Markdown',
 
-    `7. Si elle est validée, le statut devient *VALIDATED* et la récompense est créditée.\n` +
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback(
+              '🚀 Démarrer une Tâche',
+              'task_facebook'
+            )
+          ],
 
-    `8. Si elle est rejetée, aucun reward n'est crédité.\n\n` +
+          [
+            Markup.button.callback(
+              '📞 Support',
+              'action_contact_support'
+            )
+          ]
+        ])
+      }
+    );
+  }
+);
 
-    `ℹ️ Vous recevrez automatiquement une notification Telegram concernant la décision.`,
-
-    {
-      parse_mode: 'Markdown',
-
-      ...Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '🚀 Démarrer une tâche',
-            'task_facebook'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '📞 Contacter le Support',
-            'action_contact_support'
-          )
-        ]
-      ])
-    }
-  );
-});
-
-// ====================================================
-// 9. BALANCE MENU
-// ====================================================
+// ============================================================
+// 11. BALANCE
+// ============================================================
 
 async function handleBalanceMenu(ctx) {
 
   const userId =
     String(
-      ctx.from?.id ||
-      'unknown'
+      ctx.from?.id || 'unknown'
     );
 
   const user =
-    getUserData(
-      userId,
-      ctx.from?.username,
-      ctx.from?.first_name
+    await refreshUser(
+      userId
+    );
+
+  if (!user) {
+
+    return ctx.reply(
+      '❌ Utilisateur introuvable.'
+    );
+  }
+
+  const pendingResult =
+    await dbQuery(
+      `
+      SELECT
+        COUNT(*)::int AS count,
+
+        COALESCE(
+          SUM(reward_usd),
+          0
+        ) AS amount
+
+      FROM tasks
+
+      WHERE telegram_user_id = $1
+
+        AND validation_status =
+          'pending'
+      `,
+      [userId]
+    );
+
+  const pendingCount =
+    Number(
+      pendingResult.rows[0]?.count || 0
+    );
+
+  const pendingAmount =
+    Number(
+      pendingResult.rows[0]?.amount || 0
+    );
+
+  const completedResult =
+    await dbQuery(
+      `
+      SELECT COUNT(*)::int AS count
+
+      FROM tasks
+
+      WHERE telegram_user_id = $1
+
+        AND validation_status =
+          'validated'
+      `,
+      [userId]
+    );
+
+  const completed =
+    Number(
+      completedResult.rows[0]?.count || 0
     );
 
   userSessions[userId] = {
     step: 'START'
   };
 
-  const pendingTasks =
-    Array.isArray(user.pendingTasks)
-      ? user.pendingTasks.filter(
-          task =>
-            task.validation_status === 'pending' ||
-            task.status === 'pending'
-        )
-      : [];
-
-  const pendingAmount =
-    pendingTasks.reduce(
-      (total, task) =>
-        total +
-        Number(
-          task.reward_amount || 0
-        ),
-      0
-    );
-
   await ctx.reply(
 
     `💰 *Votre Solde & Activité*\n\n` +
 
-    `👤 Utilisateur : *${user.firstName}*\n` +
+    `👤 Utilisateur : *${user.first_name || 'Opérateur'}*\n` +
 
-    `🆔 ID : \`${user.userId}\`\n\n` +
+    `🆔 ID : \`${user.telegram_user_id}\`\n\n` +
 
     `💵 *Solde disponible :* ` +
     `\`${Number(user.balance || 0).toFixed(2)} €\`\n\n` +
 
     `⏳ *Tâches PENDING :* ` +
-    `\`${pendingTasks.length}\`\n` +
+    `\`${pendingCount}\`\n` +
 
-    `💶 *Rewards en attente :* ` +
+    `💵 *Rewards en attente :* ` +
     `\`${pendingAmount.toFixed(2)} €\`\n\n` +
 
     `📊 *Tâches validées :* ` +
-    `\`${Number(user.tasksCompleted || 0)}\`\n\n` +
+    `\`${completed}\`\n\n` +
 
-    `👥 *Filleuls :* ` +
-    `\`${Number(user.referralsCount || 0)}\`\n` +
-
-    `💎 *Commissions :* ` +
-    `\`${Number(user.referralEarnings || 0).toFixed(2)} €\`\n\n` +
+    `💎 *Total gagné :* ` +
+    `\`${Number(user.total_earned || 0).toFixed(2)} €\`\n\n` +
 
     `_Les rewards PENDING ne sont pas inclus dans le solde disponible._`,
 
@@ -957,16 +1384,15 @@ async function handleBalanceMenu(ctx) {
   );
 }
 
-// ====================================================
-// 10. TASK MENU
-// ====================================================
+// ============================================================
+// 12. TASK MENU
+// ============================================================
 
 async function handleTasksMenu(ctx) {
 
   const userId =
     String(
-      ctx.from?.id ||
-      'unknown'
+      ctx.from?.id || 'unknown'
     );
 
   userSessions[userId] = {
@@ -978,10 +1404,18 @@ async function handleTasksMenu(ctx) {
 
     `🌐 *Tâche : Facebook*\n\n` +
 
-    `💵 Récompense par tâche validée : ` +
+    `💵 Reward par tâche validée : ` +
     `*${TASK_REWARD_EUR.toFixed(2)} €*\n\n` +
 
-    `Choisissez la méthode disponible :`,
+    `📌 *Important :*\n` +
+
+    `La soumission est d'abord enregistrée en *PENDING*.\n` +
+
+    `Elle sera ensuite vérifiée par un administrateur.\n` +
+
+    `Le reward n'est crédité qu'après validation.\n\n` +
+
+    `Sélectionnez la méthode disponible :`,
 
     {
       parse_mode: 'Markdown',
@@ -991,8 +1425,13 @@ async function handleTasksMenu(ctx) {
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback(
-            '🍪 Continuer',
+            '🍪 Cookies',
             'auth_cookies'
+          ),
+
+          Markup.button.callback(
+            '🔐 2FA',
+            'auth_2fa'
           )
         ],
 
@@ -1014,31 +1453,36 @@ async function handleTasksMenu(ctx) {
   );
 }
 
-// ====================================================
-// 11. WITHDRAWAL MENU
-// ====================================================
+// ============================================================
+// 13. WITHDRAWAL
+// ============================================================
 
 async function handleWithdrawalMenu(ctx) {
 
   const userId =
     String(
-      ctx.from?.id ||
-      'unknown'
+      ctx.from?.id || 'unknown'
     );
 
   const user =
-    getUserData(
-      userId,
-      ctx.from?.username,
-      ctx.from?.first_name
+    await refreshUser(
+      userId
     );
 
-  userSessions[userId] = {
-    step: 'START'
-  };
+  if (!user) {
 
-  const isEligible =
-    Number(user.balance || 0) >=
+    return ctx.reply(
+      '❌ Utilisateur introuvable.'
+    );
+  }
+
+  const balance =
+    Number(
+      user.balance || 0
+    );
+
+  const eligible =
+    balance >=
     MIN_WITHDRAWAL_EUR;
 
   await ctx.reply(
@@ -1046,14 +1490,14 @@ async function handleWithdrawalMenu(ctx) {
     `🏦 *Demande de Retrait*\n\n` +
 
     `💵 Solde disponible : ` +
-    `*${Number(user.balance || 0).toFixed(2)} €*\n` +
+    `*${balance.toFixed(2)} €*\n` +
 
     `🎯 Minimum : ` +
     `*${MIN_WITHDRAWAL_EUR.toFixed(2)} €*\n\n` +
 
     (
-      isEligible
-        ? `🟢 *Vous êtes éligible au retrait.*`
+      eligible
+        ? `🟢 *Vous êtes éligible.*`
         : `🟡 *Solde insuffisant pour le moment.*`
     ),
 
@@ -1079,7 +1523,7 @@ async function handleWithdrawalMenu(ctx) {
 
         [
           Markup.button.callback(
-            '💳 Virement bancaire',
+            '💳 Virement',
             'withdraw_bank'
           )
         ]
@@ -1088,33 +1532,22 @@ async function handleWithdrawalMenu(ctx) {
   );
 }
 
-// ====================================================
-// 12. SUPPORT
-// ====================================================
+// ============================================================
+// 14. SUPPORT
+// ============================================================
 
 async function handleSupportMenu(ctx) {
-
-  const userId =
-    String(
-      ctx.from?.id ||
-      'unknown'
-    );
-
-  userSessions[userId] = {
-    step: 'START'
-  };
 
   await ctx.reply(
 
     `📞 *Support & Assistance*\n\n` +
 
-    `Une question, un problème avec une tâche ou un paiement ?\n\n` +
+    `Pour toute question concernant votre tâche, ` +
+    `votre validation ou votre paiement, contactez le support officiel.\n\n` +
 
-    `👤 Support : @TaskifySupport\n` +
+    `👤 Support : @TaskifySupport\n\n` +
 
-    `📢 Canal : @TaskifyAnnouncements\n\n` +
-
-    `_Utilisez le bouton ci-dessous pour contacter le support._`,
+    `_Ne transmettez jamais de mot de passe personnel ni de jeton de session dans le chat._`,
 
     {
       parse_mode: 'Markdown',
@@ -1127,41 +1560,31 @@ async function handleSupportMenu(ctx) {
             '💬 Ouvrir le Support',
             'https://t.me/TaskifySupport'
           )
-        ],
-
-        [
-          Markup.button.callback(
-            '❓ FAQ',
-            'action_faq'
-          )
         ]
       ])
     }
   );
 }
 
-// ====================================================
-// 13. REFERRAL
-// ====================================================
+// ============================================================
+// 15. REFERRAL
+// ============================================================
 
 async function handleReferralMenu(ctx) {
 
   const userId =
     String(
-      ctx.from?.id ||
-      'unknown'
+      ctx.from?.id || 'unknown'
     );
 
   const user =
-    getUserData(
-      userId,
-      ctx.from?.username,
-      ctx.from?.first_name
+    await refreshUser(
+      userId
     );
 
-  userSessions[userId] = {
-    step: 'START'
-  };
+  if (!user) {
+    return;
+  }
 
   const botUsername =
     ctx.botInfo?.username ||
@@ -1174,16 +1597,14 @@ async function handleReferralMenu(ctx) {
 
     `👥 *Programme de Parrainage*\n\n` +
 
-    `💎 Commission par tâche validée d'un filleul : ` +
-    `*+${REFERRAL_COMMISSION_EUR.toFixed(2)} €*\n\n` +
-
     `📊 Filleuls : ` +
-    `\`${user.referralsCount}\`\n` +
+    `\`${Number(user.referrals_count || 0)}\`\n\n` +
 
     `💵 Commissions : ` +
-    `\`${Number(user.referralEarnings || 0).toFixed(2)} €\`\n\n` +
+    `\`${Number(user.referral_earnings || 0).toFixed(2)} €\`\n\n` +
 
     `🔗 *Votre lien :*\n` +
+
     `\`${refLink}\``,
 
     {
@@ -1194,7 +1615,7 @@ async function handleReferralMenu(ctx) {
       ...Markup.inlineKeyboard([
         [
           Markup.button.url(
-            '📤 Partager mon lien',
+            '📤 Partager',
             `https://t.me/share/url?url=${encodeURIComponent(refLink)}`
           )
         ]
@@ -1203,100 +1624,83 @@ async function handleReferralMenu(ctx) {
   );
 }
 
-// ====================================================
-// 14. LEADERBOARD
-// ====================================================
+// ============================================================
+// 16. LEADERBOARD
+// ============================================================
 
 async function handleLeaderboardMenu(ctx) {
 
-  const userId =
-    String(
-      ctx.from?.id ||
-      'unknown'
+  const result =
+    await dbQuery(
+      `
+      SELECT
+        u.telegram_user_id,
+        u.first_name,
+        COALESCE(
+          COUNT(t.id),
+          0
+        )::int AS completed
+
+      FROM users u
+
+      LEFT JOIN tasks t
+        ON t.telegram_user_id =
+           u.telegram_user_id
+
+        AND t.validation_status =
+            'validated'
+
+      GROUP BY
+        u.id,
+        u.telegram_user_id,
+        u.first_name
+
+      ORDER BY completed DESC
+
+      LIMIT 10
+      `
     );
 
-  const user =
-    getUserData(
-      userId,
-      ctx.from?.username,
-      ctx.from?.first_name
-    );
+  let message =
+    `🏆 *Classement des Opérateurs*\n\n`;
 
-  userSessions[userId] = {
-    step: 'START'
-  };
+  if (result.rows.length === 0) {
+
+    message +=
+      `Aucune tâche validée pour le moment.`;
+
+  } else {
+
+    result.rows.forEach(
+      (row, index) => {
+
+        message +=
+          `${index + 1}. ` +
+          `${row.first_name || 'Opérateur'} — ` +
+          `\`${row.completed} validées\`\n`;
+      }
+    );
+  }
 
   await ctx.reply(
-
-    `🏆 *Classement des Opérateurs*\n\n` +
-
-    `1. 🥇 Opérateur #9482 — 428 tâches\n` +
-    `2. 🥈 Opérateur #1092 — 391 tâches\n` +
-    `3. 🥉 Opérateur #7401 — 315 tâches\n` +
-    `4. ⭐ Opérateur #5892 — 280 tâches\n` +
-    `5. ⭐ Opérateur #3419 — 204 tâches\n\n` +
-
-    `━━━━━━━━━━━━━━━━━━\n` +
-
-    `📍 Votre position : ` +
-    `\`${user.tasksCompleted > 0 ? 'Top 15%' : 'Non classé'}\`\n` +
-
-    `📊 Vos tâches validées : ` +
-    `\`${user.tasksCompleted}\``,
-
+    message,
     {
       parse_mode: 'Markdown',
 
-      ...MAIN_REPLY_KEYBOARD,
-
-      ...Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '🚀 Faire une tâche',
-            'task_facebook'
-          )
-        ]
-      ])
+      ...MAIN_REPLY_KEYBOARD
     }
   );
 }
 
-// ====================================================
-// 15. LANGUAGE
-// ====================================================
+// ============================================================
+// 17. LANGUAGE
+// ============================================================
 
 async function handleLanguageMenu(ctx) {
-
-  const userId =
-    String(
-      ctx.from?.id ||
-      'unknown'
-    );
-
-  const user =
-    getUserData(
-      userId,
-      ctx.from?.username,
-      ctx.from?.first_name
-    );
-
-  userSessions[userId] = {
-    step: 'START'
-  };
-
-  const currentLang =
-    user.language === 'mg'
-      ? '🇲🇬 Malagasy'
-      : user.language === 'en'
-        ? '🇬🇧 English'
-        : '🇫🇷 Français';
 
   await ctx.reply(
 
     `🪩 *Sélection de la Langue*\n\n` +
-
-    `Langue actuelle : *${currentLang}*\n\n` +
-
     `Choisissez votre langue :`,
 
     {
@@ -1326,14 +1730,13 @@ async function handleLanguageMenu(ctx) {
   );
 }
 
-// ====================================================
-// 16. BOT.HEARS
-// ====================================================
+// ============================================================
+// 18. KEYBOARD HANDLERS
+// ============================================================
 
 bot.hears(
   [
     '💰 Solde',
-    '💰 Solde / Gains',
     'Solde',
     'solde',
     '/balance',
@@ -1348,8 +1751,6 @@ bot.hears(
     '📋 Taches',
     'Tâches',
     'Taches',
-    'Démarrer tâche',
-    'Démarrer tâche Facebook',
     '/tasks',
     '/taches',
     '/task'
@@ -1373,7 +1774,6 @@ bot.hears(
     '📞 Support',
     'Support',
     'support',
-    'Assistance',
     '/support'
   ],
   handleSupportMenu
@@ -1382,9 +1782,8 @@ bot.hears(
 bot.hears(
   [
     '👥 Parrainages',
-    '👥 Parrainage',
-    'Parrainages',
     'Parrainage',
+    'Parrainages',
     '/referral',
     '/parrainage'
   ],
@@ -1405,7 +1804,6 @@ bot.hears(
 bot.hears(
   [
     '🪩 Langue',
-    '🪩 Langues',
     'Langue',
     'langue',
     'Language',
@@ -1415,139 +1813,95 @@ bot.hears(
   handleLanguageMenu
 );
 
-// ====================================================
-// 17. LANGUAGE CALLBACKS
-// ====================================================
+// ============================================================
+// 19. LANGUAGE CALLBACKS
+// ============================================================
+
+async function setLanguage(
+  ctx,
+  language,
+  message
+) {
+
+  const userId =
+    String(
+      ctx.from?.id || 'unknown'
+    );
+
+  await dbQuery(
+    `
+    UPDATE users
+
+    SET
+      language = $1,
+      updated_at = NOW()
+
+    WHERE telegram_user_id = $2
+    `,
+    [
+      language,
+      userId
+    ]
+  );
+
+  await ctx.answerCbQuery(
+    message
+  );
+
+  await renderScreen(
+    ctx,
+    message,
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback(
+          '📋 Tâches',
+          'task_facebook'
+        )
+      ],
+
+      [
+        Markup.button.callback(
+          '💰 Solde',
+          'action_check_balance'
+        )
+      ]
+    ])
+  );
+}
 
 bot.action(
   'set_lang_fr',
-  async ctx => {
-
-    const userId =
-      String(ctx.from.id);
-
-    const user =
-      getUserData(
-        userId,
-        ctx.from.username,
-        ctx.from.first_name
-      );
-
-    user.language = 'fr';
-
-    await ctx.answerCbQuery(
-      'Français configuré !'
-    );
-
-    await renderScreen(
+  ctx =>
+    setLanguage(
       ctx,
-      '✅ Langue configurée en **Français**.',
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '📋 Tâches',
-            'task_facebook'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '💰 Solde',
-            'action_check_balance'
-          )
-        ]
-      ])
-    );
-  }
+      'fr',
+      '🇫🇷 Langue configurée en Français.'
+    )
 );
 
 bot.action(
   'set_lang_mg',
-  async ctx => {
-
-    const userId =
-      String(ctx.from.id);
-
-    const user =
-      getUserData(
-        userId,
-        ctx.from.username,
-        ctx.from.first_name
-      );
-
-    user.language = 'mg';
-
-    await ctx.answerCbQuery(
-      'Malagasy voafidy!'
-    );
-
-    await renderScreen(
+  ctx =>
+    setLanguage(
       ctx,
-      `✅ Voafaritra amin'ny teny **Malagasy** ny bot.`,
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '📋 Hanao Asa',
-            'task_facebook'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '💰 Hijery Solde',
-            'action_check_balance'
-          )
-        ]
-      ])
-    );
-  }
+      'mg',
+      '🇲🇬 Voafidy ny teny Malagasy.'
+    )
 );
 
 bot.action(
   'set_lang_en',
-  async ctx => {
-
-    const userId =
-      String(ctx.from.id);
-
-    const user =
-      getUserData(
-        userId,
-        ctx.from.username,
-        ctx.from.first_name
-      );
-
-    user.language = 'en';
-
-    await ctx.answerCbQuery(
-      'English configured!'
-    );
-
-    await renderScreen(
+  ctx =>
+    setLanguage(
       ctx,
-      '🌐 Language updated to **English**.',
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '📋 Tasks',
-            'task_facebook'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '💰 Balance',
-            'action_check_balance'
-          )
-        ]
-      ])
-    );
-  }
+      'en',
+      '🇬🇧 Language updated to English.'
+    )
 );
 
-// ====================================================
-// 18. TASK FACEBOOK
-// ====================================================
+// ============================================================
+// 20. TASK FLOW
+// ============================================================
 
 bot.action(
   'task_facebook',
@@ -1556,7 +1910,9 @@ bot.action(
     await ctx.answerCbQuery();
 
     const userId =
-      String(ctx.from.id);
+      String(
+        ctx.from?.id || 'unknown'
+      );
 
     userSessions[userId] = {
       step: 'AUTH_CHOICE',
@@ -1567,15 +1923,17 @@ bot.action(
 
       ctx,
 
-      `🌐 *Tâche : Facebook*\n\n` +
+      `🌐 *Tâche Facebook*\n\n` +
 
-      `💵 Récompense : ` +
+      `💵 Reward : ` +
       `*${TASK_REWARD_EUR.toFixed(2)} €*\n\n` +
 
-      `La soumission sera d'abord enregistrée en *PENDING*.\n\n` +
+      `📌 La tâche sera d'abord enregistrée en *PENDING*.\n\n` +
 
       `Après vérification par un administrateur :\n` +
+
       `✅ VALIDATED → reward crédité\n` +
+
       `❌ REJECTED → aucun reward`,
 
       Markup.inlineKeyboard([
@@ -1588,13 +1946,6 @@ bot.action(
 
         [
           Markup.button.callback(
-            'ℹ️ Consignes',
-            'action_task_rules'
-          )
-        ],
-
-        [
-          Markup.button.callback(
             '❌ Annuler',
             'action_cancel'
           )
@@ -1604,9 +1955,9 @@ bot.action(
   }
 );
 
-// ====================================================
-// 19. AUTH 2FA
-// ====================================================
+// ============================================================
+// 21. 2FA
+// ============================================================
 
 bot.action(
   'auth_2fa',
@@ -1618,11 +1969,9 @@ bot.action(
 
       ctx,
 
-      `⚠️ *Méthode 2FA indisponible*\n\n` +
+      `⚠️ *2FA indisponible*\n\n` +
 
-      `Cette méthode est momentanément suspendue.\n\n` +
-
-      `Veuillez utiliser la méthode disponible.`,
+      `Cette méthode n'est momentanément pas disponible.`,
 
       Markup.inlineKeyboard([
         [
@@ -1643,9 +1992,9 @@ bot.action(
   }
 );
 
-// ====================================================
-// 20. AUTH COOKIES / TASK PREPARATION
-// ====================================================
+// ============================================================
+// 22. COOKIE STEP
+// ============================================================
 
 bot.action(
   'auth_cookies',
@@ -1654,13 +2003,12 @@ bot.action(
     await ctx.answerCbQuery();
 
     const userId =
-      String(ctx.from.id);
+      String(
+        ctx.from?.id || 'unknown'
+      );
 
     const identity =
       getRandomIdentity();
-
-    const assignedPassword =
-      DEFAULT_BOT_PASSWORD;
 
     userSessions[userId] = {
 
@@ -1677,35 +2025,31 @@ bot.action(
         identity.lastName,
 
       password:
-        assignedPassword
+        DEFAULT_BOT_PASSWORD
     };
 
     await renderScreen(
 
       ctx,
 
-      `⚠️ *Informations de préparation*\n\n` +
+      `⚠️ *Informations de tâche*\n\n` +
 
-      `✅ Prénom : \`${identity.firstName}\`\n` +
+      `✅ Prénom : ` +
+      `\`${identity.firstName}\`\n` +
 
-      `✅ Nom : \`${identity.lastName}\`\n\n` +
+      `✅ Nom : ` +
+      `\`${identity.lastName}\`\n` +
 
-      `Une fois votre tâche terminée selon les règles autorisées, vous pourrez envoyer l'identifiant demandé.\n\n` +
+      `🔐 Mot de passe assigné : ` +
+      `\`${DEFAULT_BOT_PASSWORD}\`\n\n` +
 
-      `⚠️ *Ne transmettez jamais de mot de passe personnel ou de jeton de session dans le chat.*`,
+      `Une fois la tâche préparée, cliquez sur *Envoyer l'UID*.`,
 
       Markup.inlineKeyboard([
         [
           Markup.button.callback(
             '📥 Envoyer UID',
             'action_send_uid'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '🔙 Retour',
-            'task_facebook'
           )
         ],
 
@@ -1720,9 +2064,9 @@ bot.action(
   }
 );
 
-// ====================================================
-// 21. SEND UID
-// ====================================================
+// ============================================================
+// 23. SEND UID
+// ============================================================
 
 bot.action(
   'action_send_uid',
@@ -1731,7 +2075,9 @@ bot.action(
     await ctx.answerCbQuery();
 
     const userId =
-      String(ctx.from.id);
+      String(
+        ctx.from?.id || 'unknown'
+      );
 
     if (!userSessions[userId]) {
 
@@ -1749,7 +2095,7 @@ bot.action(
 
       `✍️ *Envoi de l'UID*\n\n` +
 
-      `Veuillez envoyer l'UID demandé :`,
+      `Veuillez envoyer votre UID numérique.`,
 
       Markup.inlineKeyboard([
         [
@@ -1763,9 +2109,9 @@ bot.action(
   }
 );
 
-// ====================================================
-// 22. CANCEL
-// ====================================================
+// ============================================================
+// 24. CANCEL
+// ============================================================
 
 bot.action(
   'action_cancel',
@@ -1774,7 +2120,9 @@ bot.action(
     await ctx.answerCbQuery();
 
     const userId =
-      String(ctx.from.id);
+      String(
+        ctx.from?.id || 'unknown'
+      );
 
     delete userSessions[userId];
 
@@ -1783,7 +2131,6 @@ bot.action(
       ctx,
 
       `❌ *Processus annulé.*\n\n` +
-
       `Aucune nouvelle tâche n'a été enregistrée.`,
 
       Markup.inlineKeyboard([
@@ -1798,21 +2145,65 @@ bot.action(
   }
 );
 
-// ====================================================
-// 23. TEXT INPUT
-// ====================================================
+// ============================================================
+// 25. TASK RULES
+// ============================================================
+
+bot.action(
+  'action_task_rules',
+  async ctx => {
+
+    await ctx.answerCbQuery();
+
+    await renderScreen(
+
+      ctx,
+
+      `📋 *Consignes*\n\n` +
+
+      `1. Utilisez les informations fournies par le bot.\n` +
+
+      `2. Ne soumettez pas deux fois le même UID.\n` +
+
+      `3. La tâche est enregistrée en PENDING après soumission.\n` +
+
+      `4. Un administrateur effectue la validation.\n` +
+
+      `5. Le reward est crédité uniquement après VALIDATION.\n\n` +
+
+      `⚠️ Ne transmettez jamais de mot de passe personnel ni de jeton de session dans le chat.`,
+
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback(
+            '✅ Compris',
+            'task_facebook'
+          )
+        ]
+      ])
+    );
+  }
+);
+
+// ============================================================
+// 26. TEXT INPUT
+// ============================================================
 
 bot.on(
   'text',
   async ctx => {
 
     const userId =
-      String(ctx.from?.id || 'unknown');
+      String(
+        ctx.from?.id || 'unknown'
+      );
 
     const username =
-      ctx.from?.username ||
+      ctx.from?.username || '';
+
+    const firstName =
       ctx.from?.first_name ||
-      'utilisateur';
+      'Opérateur';
 
     const text =
       ctx.message.text.trim();
@@ -1820,92 +2211,81 @@ bot.on(
     const lowerText =
       text.toLowerCase();
 
-    const session =
-      userSessions[userId];
-
-    const user =
-      getUserData(
-        userId,
-        ctx.from?.username,
-        ctx.from?.first_name
-      );
-
-    // ==================================================
+    // --------------------------------------------------------
     // MENU
-    // ==================================================
+    // --------------------------------------------------------
 
     if (
-      text.includes('Solde') ||
       lowerText === 'solde' ||
       lowerText === '/solde' ||
-      lowerText === '/balance'
+      lowerText === '/balance' ||
+      text.includes('💰 Solde')
     ) {
       return handleBalanceMenu(ctx);
     }
 
     if (
-      text.includes('Tâches') ||
-      text.includes('Taches') ||
-      text.includes('Démarrer tâche') ||
       lowerText === 'taches' ||
       lowerText === 'tâches' ||
       lowerText === '/tasks' ||
       lowerText === '/taches' ||
-      lowerText === '/task'
+      lowerText === '/task' ||
+      text.includes('📋 Tâches')
     ) {
       return handleTasksMenu(ctx);
     }
 
     if (
-      text.includes('Retrait') ||
       lowerText === 'retrait' ||
       lowerText === '/withdraw' ||
-      lowerText === '/retrait'
+      lowerText === '/retrait' ||
+      text.includes('🏦 Retrait')
     ) {
       return handleWithdrawalMenu(ctx);
     }
 
     if (
-      text.includes('Support') ||
-      text.includes('Assistance') ||
       lowerText === 'support' ||
-      lowerText === '/support'
+      lowerText === '/support' ||
+      text.includes('📞 Support')
     ) {
       return handleSupportMenu(ctx);
     }
 
     if (
-      text.includes('Parrainage') ||
-      text.includes('Parrainages') ||
       lowerText === 'parrainage' ||
-      lowerText === '/referral'
+      lowerText === 'parrainages' ||
+      lowerText === '/referral' ||
+      text.includes('👥 Parrainage')
     ) {
       return handleReferralMenu(ctx);
     }
 
     if (
-      text.includes('Classement') ||
       lowerText === 'classement' ||
       lowerText === '/leaderboard' ||
-      lowerText === '/top'
+      lowerText === '/top' ||
+      text.includes('🏆 Classement')
     ) {
       return handleLeaderboardMenu(ctx);
     }
 
     if (
-      text.includes('Langue') ||
-      text.includes('Langues') ||
       lowerText === 'langue' ||
       lowerText === 'language' ||
       lowerText === '/language' ||
-      lowerText === '/langue'
+      lowerText === '/langue' ||
+      text.includes('🪩 Langue')
     ) {
       return handleLanguageMenu(ctx);
     }
 
-    // ==================================================
-    // NO SESSION
-    // ==================================================
+    // --------------------------------------------------------
+    // SESSION
+    // --------------------------------------------------------
+
+    const session =
+      userSessions[userId];
 
     if (
       !session ||
@@ -1913,42 +2293,34 @@ bot.on(
       session.step === 'START'
     ) {
 
+      const user =
+        await getUserData(
+          userId,
+          username,
+          firstName
+        );
+
       return ctx.reply(
 
-        `👋 Bonjour *${user.firstName}* !\n\n` +
+        `👋 Bonjour *${user.first_name || firstName}* !\n\n` +
 
-        `Utilisez le menu ci-dessous pour continuer.`,
+        `Utilisez le menu ci-dessous.`,
 
         {
           parse_mode: 'Markdown',
 
-          ...MAIN_REPLY_KEYBOARD,
-
-          ...Markup.inlineKeyboard([
-            [
-              Markup.button.callback(
-                '🚀 Démarrer une tâche',
-                'task_facebook'
-              )
-            ],
-
-            [
-              Markup.button.callback(
-                '💰 Voir mon solde',
-                'action_check_balance'
-              )
-            ]
-          ])
+          ...MAIN_REPLY_KEYBOARD
         }
       );
     }
 
-    // ==================================================
+    // --------------------------------------------------------
     // UID
-    // ==================================================
+    // --------------------------------------------------------
 
     if (
-      session.step === 'AWAITING_UID'
+      session.step ===
+      'AWAITING_UID'
     ) {
 
       if (
@@ -1958,20 +2330,38 @@ bot.on(
         return ctx.reply(
 
           `⚠️ *UID invalide.*\n\n` +
-
-          `Veuillez envoyer uniquement un identifiant numérique valide.`,
+          `Envoyez uniquement l'UID numérique.`,
 
           {
-            parse_mode: 'Markdown',
+            parse_mode: 'Markdown'
+          }
+        );
+      }
 
-            ...Markup.inlineKeyboard([
-              [
-                Markup.button.callback(
-                  '❌ Annuler',
-                  'action_cancel'
-                )
-              ]
-            ])
+      // Check duplicate UID
+      const duplicate =
+        await dbQuery(
+          `
+          SELECT task_id
+          FROM tasks
+          WHERE uid = $1
+          LIMIT 1
+          `,
+          [text]
+        );
+
+      if (
+        duplicate.rows.length > 0
+      ) {
+
+        return ctx.reply(
+
+          `⚠️ *UID déjà soumis.*\n\n` +
+
+          `Cet UID existe déjà dans le système.`,
+
+          {
+            parse_mode: 'Markdown'
           }
         );
       }
@@ -1980,19 +2370,17 @@ bot.on(
         text;
 
       session.step =
-        'AWAITING_SUBMISSION_CONFIRMATION';
+        'AWAITING_SUBMISSION';
 
-      return ctx.reply(
+      await ctx.reply(
 
         `✅ *UID reçu.*\n\n` +
 
-        `Votre soumission peut maintenant être enregistrée.\n\n` +
+        `La soumission peut maintenant être enregistrée.\n\n` +
 
-        `📌 Elle sera placée en *PENDING*.\n` +
+        `📌 Statut initial : *PENDING*\n\n` +
 
-        `🔎 Un administrateur devra la vérifier.\n\n` +
-
-        `⚠️ Ne transmettez pas de mot de passe personnel ni de jeton de session.`,
+        `⚠️ Aucun reward ne sera crédité avant la validation administrateur.`,
 
         {
           parse_mode: 'Markdown',
@@ -2000,7 +2388,7 @@ bot.on(
           ...Markup.inlineKeyboard([
             [
               Markup.button.callback(
-                '✅ Soumettre la tâche',
+                '✅ Confirmer la soumission',
                 'confirm_task_submission'
               )
             ],
@@ -2014,58 +2402,22 @@ bot.on(
           ])
         }
       );
+
+      return;
     }
 
-    // ==================================================
-    // OLD COOKIE STEP
-    // ==================================================
-
-    if (
-      session.step === 'AWAITING_COOKIES'
-    ) {
-
-      return ctx.reply(
-
-        `ℹ️ *Soumission sécurisée*\n\n` +
-
-        `Le bot ne demande pas de session cookie ou de jeton d'authentification dans le chat.\n\n` +
-
-        `Utilisez le bouton de soumission pour enregistrer votre tâche.`,
-
-        {
-          parse_mode: 'Markdown',
-
-          ...Markup.inlineKeyboard([
-            [
-              Markup.button.callback(
-                '✅ Soumettre',
-                'confirm_task_submission'
-              )
-            ],
-
-            [
-              Markup.button.callback(
-                '❌ Annuler',
-                'action_cancel'
-              )
-            ]
-          ])
-        }
-      );
-    }
-
-    // ==================================================
-    // CONFIRMATION
-    // ==================================================
+    // --------------------------------------------------------
+    // LEGACY SUBMISSION
+    // --------------------------------------------------------
 
     if (
       session.step ===
-      'AWAITING_SUBMISSION_CONFIRMATION'
+      'AWAITING_SUBMISSION'
     ) {
 
       return ctx.reply(
 
-        `ℹ️ Utilisez le bouton *✅ Soumettre la tâche* ci-dessus pour confirmer.`,
+        `ℹ️ Utilisez le bouton *Confirmer la soumission* pour enregistrer la tâche.`,
 
         {
           parse_mode: 'Markdown'
@@ -2075,9 +2427,9 @@ bot.on(
   }
 );
 
-// ====================================================
-// 24. CONFIRM TASK SUBMISSION
-// ====================================================
+// ============================================================
+// 27. CONFIRM TASK SUBMISSION
+// ============================================================
 
 bot.action(
   'confirm_task_submission',
@@ -2086,33 +2438,32 @@ bot.action(
     await ctx.answerCbQuery();
 
     const userId =
-      String(ctx.from.id);
+      String(
+        ctx.from?.id || 'unknown'
+      );
 
     const username =
-      ctx.from.username ||
-      ctx.from.first_name ||
-      'utilisateur';
+      ctx.from?.username ||
+      '';
+
+    const telegramFirstName =
+      ctx.from?.first_name ||
+      'Opérateur';
 
     const session =
       userSessions[userId];
 
-    const user =
-      getUserData(
-        userId,
-        ctx.from.username,
-        ctx.from.first_name
-      );
-
     if (
       !session ||
-      !session.uid
+      session.step !==
+      'AWAITING_SUBMISSION'
     ) {
 
       return renderScreen(
 
         ctx,
 
-        `❌ *Session expirée.*\n\n` +
+        `⚠️ *Session expirée.*\n\n` +
         `Veuillez recommencer la tâche.`,
 
         Markup.inlineKeyboard([
@@ -2126,211 +2477,303 @@ bot.action(
       );
     }
 
-    const taskRecord = {
+    const taskId =
+      `task-${Date.now()}-${userId}`;
 
-      id:
-        `task-${Date.now()}-${userId}`,
-
-      uid:
-        session.uid,
-
-      telegramUserId:
+    const user =
+      await getUserData(
         userId,
-
-      telegramUsername:
         username,
+        telegramFirstName
+      );
 
-      firstName:
-        session.firstName ||
-        user.firstName ||
-        'Utilisateur',
+    const firstName =
+      session.firstName ||
+      user.first_name ||
+      telegramFirstName;
 
-      lastName:
-        session.lastName ||
-        '',
+    const lastName =
+      session.lastName ||
+      user.last_name ||
+      '';
 
-      taskType:
-        session.taskType ||
-        'Facebook',
+    // --------------------------------------------------------
+    // INSERT DATABASE
+    // --------------------------------------------------------
 
-      // ================================================
-      // VALIDATION
-      // ================================================
-
-      status:
-        'pending',
-
-      validation_status:
-        'pending',
-
-      // ================================================
-      // REWARD
-      // ================================================
-
-      reward_amount:
-        TASK_REWARD_EUR,
-
-      reward_paid:
-        false,
-
-      reward_paid_at:
-        null,
-
-      // ================================================
-      // ADMIN
-      // ================================================
-
-      validated_at:
-        null,
-
-      validated_by:
-        null,
-
-      validation_reason:
-        null,
-
-      // ================================================
-      // ACCOUNT STATE
-      // ================================================
-
-      account_created:
-        false,
-
-      account_created_at:
-        null,
-
-      timestamp:
-        new Date().toISOString(),
-
-      notes:
-        `Soumission reçue via ${PLATFORM_NAME}. ` +
-        `Statut initial : PENDING. ` +
-        `Validation administrateur requise.`
-    };
+    const client =
+      await pool.connect();
 
     try {
 
-      // ================================================
-      // ADD PENDING
-      // ================================================
+      await client.query(
+        'BEGIN'
+      );
+
+      // Duplicate protection
+      const duplicate =
+        await client.query(
+          `
+          SELECT task_id
+          FROM tasks
+          WHERE uid = $1
+          LIMIT 1
+          FOR UPDATE
+          `,
+          [
+            session.uid
+          ]
+        );
 
       if (
-        !Array.isArray(
-          user.pendingTasks
-        )
+        duplicate.rows.length > 0
       ) {
-        user.pendingTasks = [];
-      }
 
-      user.pendingTasks.push(
-        taskRecord
-      );
+        await client.query(
+          'ROLLBACK'
+        );
 
-      // ================================================
-      // GOOGLE SHEETS
-      // ================================================
+        delete userSessions[userId];
 
-      await syncToGoogleSheets(
-        {
-          ...taskRecord,
+        return renderScreen(
 
-          syncAction:
-            'insert_task'
-        }
-      );
+          ctx,
 
-      // ================================================
-      // CLEAR SESSION
-      // ================================================
+          `⚠️ *UID déjà enregistré.*\n\n` +
+          `Cette soumission existe déjà.`,
 
-      delete userSessions[userId];
-
-      // ================================================
-      // RESPONSE
-      // ================================================
-
-      await ctx.reply(
-
-        `⏳ *Soumission reçue !*\n\n` +
-
-        `🆔 Task ID : ` +
-        `\`${taskRecord.id}\`\n\n` +
-
-        `📌 Statut : *PENDING*\n` +
-
-        `💵 Reward prévu : ` +
-        `*${TASK_REWARD_EUR.toFixed(2)} €*\n\n` +
-
-        `🔎 Votre tâche doit maintenant être vérifiée par un administrateur.\n\n` +
-
-        `💰 *Aucun reward n'a encore été crédité.*\n\n` +
-
-        `Vous recevrez automatiquement une notification après la décision.`,
-
-        {
-          parse_mode: 'Markdown',
-
-          ...MAIN_REPLY_KEYBOARD,
-
-          ...Markup.inlineKeyboard([
+          Markup.inlineKeyboard([
             [
               Markup.button.callback(
                 '📋 Mes tâches',
                 'action_my_tasks'
               )
-            ],
-
-            [
-              Markup.button.callback(
-                '💰 Mon solde',
-                'action_check_balance'
-              )
             ]
           ])
-        }
+        );
+      }
+
+      const taskResult =
+        await client.query(
+          `
+          INSERT INTO tasks (
+
+            task_id,
+
+            telegram_user_id,
+
+            task_type,
+
+            status,
+
+            validation_status,
+
+            uid,
+
+            first_name,
+
+            last_name,
+
+            reward_usd,
+
+            reward_paid,
+
+            validated_at,
+
+            validated_by,
+
+            validation_reason,
+
+            account_created,
+
+            account_created_at,
+
+            created_at
+
+          )
+
+          VALUES (
+
+            $1,
+            $2,
+            $3,
+            'pending',
+            'pending',
+            $4,
+            $5,
+            $6,
+            $7,
+            FALSE,
+            NULL,
+            NULL,
+            NULL,
+            FALSE,
+            NULL,
+            NOW()
+
+          )
+
+          RETURNING *
+          `,
+          [
+            taskId,
+
+            userId,
+
+            session.taskType ||
+              'Facebook',
+
+            session.uid,
+
+            firstName,
+
+            lastName,
+
+            TASK_REWARD_EUR
+          ]
+        );
+
+      await client.query(
+        'COMMIT'
+      );
+
+      const task =
+        taskResult.rows[0];
+
+      // ------------------------------------------------------
+      // GOOGLE SHEETS
+      // ------------------------------------------------------
+
+      await syncToGoogleSheets({
+
+        id:
+          task.task_id,
+
+        uid:
+          task.uid,
+
+        firstName:
+          task.first_name,
+
+        lastName:
+          task.last_name,
+
+        telegramUserId:
+          task.telegram_user_id,
+
+        telegramUsername:
+          username,
+
+        status:
+          'pending',
+
+        validation_status:
+          'pending',
+
+        reward_amount:
+          TASK_REWARD_EUR,
+
+        reward_paid:
+          false,
+
+        account_created:
+          false,
+
+        timestamp:
+          task.created_at,
+
+        taskType:
+          task.task_type,
+
+        notes:
+          `Soumission PENDING via ${PLATFORM_NAME}.`
+      });
+
+      delete userSessions[userId];
+
+      await renderScreen(
+
+        ctx,
+
+        `⏳ *Soumission enregistrée !*\n\n` +
+
+        `🆔 Task ID : ` +
+        `\`${task.task_id}\`\n\n` +
+
+        `👤 UID : ` +
+        `\`${task.uid}\`\n\n` +
+
+        `📌 Statut : *PENDING*\n\n` +
+
+        `💵 Reward prévu : ` +
+        `*${TASK_REWARD_EUR.toFixed(2)} €*\n\n` +
+
+        `🔎 Votre soumission doit maintenant être vérifiée par un administrateur.\n\n` +
+
+        `⚠️ Aucun montant n'a encore été crédité.\n\n` +
+
+        `Vous recevrez automatiquement une notification Telegram après la décision.`,
+
+        Markup.inlineKeyboard([
+
+          [
+            Markup.button.callback(
+              '📋 Mes tâches',
+              'action_my_tasks'
+            )
+          ],
+
+          [
+            Markup.button.callback(
+              '💰 Mon solde',
+              'action_check_balance'
+            )
+          ],
+
+          [
+            Markup.button.callback(
+              '🚀 Nouvelle tâche',
+              'task_facebook'
+            )
+          ]
+
+        ])
       );
 
       console.log(
-        `[TASK PENDING] ` +
-        `id=${taskRecord.id} ` +
-        `user=${userId} ` +
-        `uid=${taskRecord.uid}`
+        `[TASK PENDING] ${task.task_id} user=${userId}`
       );
 
     } catch (error) {
 
+      try {
+        await client.query(
+          'ROLLBACK'
+        );
+      } catch (_) {}
+
       console.error(
-        '[TASK SUBMISSION ERROR]',
+        '[TASK INSERT ERROR]',
         error
       );
 
-      // Remove task if saving failed
-      user.pendingTasks =
-        user.pendingTasks.filter(
-          task =>
-            task.id !==
-            taskRecord.id
-        );
-
       await ctx.reply(
-
-        `❌ *Erreur d'enregistrement.*\n\n` +
-
-        `La tâche n'a pas été validée et aucun reward n'a été crédité.`,
-
+        `❌ Erreur lors de l'enregistrement.\n\nAucun reward n'a été crédité.`,
         {
-          parse_mode: 'Markdown',
-
           ...MAIN_REPLY_KEYBOARD
         }
       );
+
+    } finally {
+
+      client.release();
     }
   }
 );
 
-// ====================================================
-// 25. MY TASKS
-// ====================================================
+// ============================================================
+// 28. MY TASKS
+// ============================================================
 
 bot.action(
   'action_my_tasks',
@@ -2339,22 +2782,48 @@ bot.action(
     await ctx.answerCbQuery();
 
     const userId =
-      String(ctx.from.id);
-
-    const user =
-      getUserData(
-        userId,
-        ctx.from.username,
-        ctx.from.first_name
+      String(
+        ctx.from?.id || 'unknown'
       );
 
-    const tasks =
-      Array.isArray(user.pendingTasks)
-        ? user.pendingTasks
-        : [];
+    const result =
+      await dbQuery(
+        `
+        SELECT
+
+          task_id,
+
+          task_type,
+
+          status,
+
+          validation_status,
+
+          validation_reason,
+
+          uid,
+
+          reward_usd,
+
+          reward_paid,
+
+          created_at,
+
+          validated_at
+
+        FROM tasks
+
+        WHERE telegram_user_id = $1
+
+        ORDER BY created_at DESC
+
+        LIMIT 15
+        `,
+        [userId]
+      );
 
     if (
-      tasks.length === 0
+      result.rows.length === 0
     ) {
 
       return renderScreen(
@@ -2362,14 +2831,7 @@ bot.action(
         ctx,
 
         `📋 *Mes tâches*\n\n` +
-
-        `Aucune tâche en attente de validation.\n\n` +
-
-        `📊 Tâches validées : ` +
-        `*${user.tasksCompleted}*\n` +
-
-        `💰 Solde : ` +
-        `*${Number(user.balance || 0).toFixed(2)} €*`,
+        `Aucune tâche enregistrée.`,
 
         Markup.inlineKeyboard([
           [
@@ -2377,34 +2839,49 @@ bot.action(
               '🚀 Nouvelle tâche',
               'task_facebook'
             )
-          ],
-
-          [
-            Markup.button.callback(
-              '💰 Solde',
-              'action_check_balance'
-            )
           ]
         ])
       );
     }
 
     let message =
-      `📋 *Mes tâches PENDING*\n\n`;
+      `📋 *Mes dernières tâches*\n\n`;
 
-    for (
-      const task of tasks.slice(-10)
-    ) {
+    result.rows.forEach(
+      task => {
 
-      message +=
-        `🆔 \`${task.id}\`\n` +
-        `📌 Statut : *${String(task.validation_status || 'pending').toUpperCase()}*\n` +
-        `💵 Reward : *${Number(task.reward_amount || TASK_REWARD_EUR).toFixed(2)} €*\n` +
-        `📅 ${new Date(task.timestamp).toLocaleString()}\n\n`;
-    }
+        const status =
+          task.validation_status ||
+          task.status ||
+          'pending';
 
-    message +=
-      `ℹ️ Le reward reste bloqué jusqu'à la validation administrative.`;
+        const icon =
+          status === 'validated'
+            ? '✅'
+            : status === 'rejected'
+              ? '❌'
+              : '⏳';
+
+        message +=
+          `${icon} \`${task.task_id}\`\n` +
+
+          `UID: \`${task.uid || '-'}\`\n` +
+
+          `Statut: *${status.toUpperCase()}*\n` +
+
+          `Reward: \`${Number(task.reward_usd || 0).toFixed(2)} €\`\n`;
+
+        if (
+          task.validation_reason
+        ) {
+
+          message +=
+            `Motif: ${task.validation_reason}\n`;
+        }
+
+        message += '\n';
+      }
+    );
 
     await renderScreen(
 
@@ -2413,1062 +2890,10 @@ bot.action(
       message,
 
       Markup.inlineKeyboard([
+
         [
           Markup.button.callback(
             '🔄 Actualiser',
-            'action_my_tasks'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '💰 Mon solde',
-            'action_check_balance'
-          )
-        ]
-      ])
-    );
-  }
-);
-
-// ====================================================
-// 26. ADMIN - /ADMIN
-// ====================================================
-
-bot.command(
-  'admin',
-  async ctx => {
-
-    const adminId =
-      String(ctx.from.id);
-
-    if (
-      !isAdmin(adminId)
-    ) {
-
-      return ctx.reply(
-        `⛔ Accès administrateur refusé.`
-      );
-    }
-
-    let totalPending = 0;
-
-    for (
-      const userId of Object.keys(userLedger)
-    ) {
-
-      const user =
-        userLedger[userId];
-
-      if (
-        Array.isArray(
-          user.pendingTasks
-        )
-      ) {
-
-        totalPending +=
-          user.pendingTasks.length;
-      }
-    }
-
-    await ctx.reply(
-
-      `🛡️ *ADMIN PANEL*\n\n` +
-
-      `👤 Admin ID : \`${adminId}\`\n\n` +
-
-      `⏳ Tâches PENDING : *${totalPending}*\n\n` +
-
-      `Choisissez une action :`,
-
-      {
-        parse_mode: 'Markdown',
-
-        ...Markup.inlineKeyboard([
-          [
-            Markup.button.callback(
-              `⏳ Voir les PENDING (${totalPending})`,
-              'admin_pending'
-            )
-          ],
-
-          [
-            Markup.button.callback(
-              '🔄 Actualiser',
-              'admin_panel'
-            )
-          ]
-        ])
-      }
-    );
-  }
-);
-
-// ====================================================
-// 27. ADMIN PANEL CALLBACK
-// ====================================================
-
-bot.action(
-  'admin_panel',
-  async ctx => {
-
-    await ctx.answerCbQuery();
-
-    const adminId =
-      String(ctx.from.id);
-
-    if (
-      !isAdmin(adminId)
-    ) {
-
-      return renderScreen(
-        ctx,
-        `⛔ Accès administrateur refusé.`
-      );
-    }
-
-    let totalPending = 0;
-
-    for (
-      const userId of Object.keys(userLedger)
-    ) {
-
-      const user =
-        userLedger[userId];
-
-      if (
-        Array.isArray(
-          user.pendingTasks
-        )
-      ) {
-        totalPending +=
-          user.pendingTasks.length;
-      }
-    }
-
-    await renderScreen(
-
-      ctx,
-
-      `🛡️ *ADMIN PANEL*\n\n` +
-
-      `👤 Admin : \`${adminId}\`\n\n` +
-
-      `⏳ Tâches PENDING : *${totalPending}*`,
-
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            `⏳ Voir les PENDING (${totalPending})`,
-            'admin_pending'
-          )
-        ]
-      ])
-    );
-  }
-);
-
-// ====================================================
-// 28. ADMIN - LIST PENDING
-// ====================================================
-
-bot.command(
-  'pending',
-  async ctx => {
-
-    const adminId =
-      String(ctx.from.id);
-
-    if (
-      !isAdmin(adminId)
-    ) {
-
-      return ctx.reply(
-        `⛔ Accès administrateur refusé.`
-      );
-    }
-
-    await sendAdminPendingList(
-      ctx
-    );
-  }
-);
-
-bot.action(
-  'admin_pending',
-  async ctx => {
-
-    await ctx.answerCbQuery();
-
-    const adminId =
-      String(ctx.from.id);
-
-    if (
-      !isAdmin(adminId)
-    ) {
-
-      return renderScreen(
-        ctx,
-        `⛔ Accès administrateur refusé.`
-      );
-    }
-
-    await sendAdminPendingList(
-      ctx
-    );
-  }
-);
-
-// ====================================================
-// SEND ADMIN PENDING LIST
-// ====================================================
-
-async function sendAdminPendingList(ctx) {
-
-  const pending = [];
-
-  for (
-    const userId of Object.keys(userLedger)
-  ) {
-
-    const user =
-      userLedger[userId];
-
-    if (
-      !Array.isArray(
-        user.pendingTasks
-      )
-    ) {
-      continue;
-    }
-
-    for (
-      const task of user.pendingTasks
-    ) {
-
-      if (
-        task.validation_status ===
-          'pending' ||
-        task.status ===
-          'pending'
-      ) {
-
-        pending.push({
-          userId,
-          user,
-          task
-        });
-      }
-    }
-  }
-
-  if (
-    pending.length === 0
-  ) {
-
-    return renderScreen(
-
-      ctx,
-
-      `✅ *Aucune tâche PENDING.*\n\n` +
-      `Toutes les tâches en attente ont été traitées.`,
-
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '🔄 Actualiser',
-            'admin_pending'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '🛡️ Admin',
-            'admin_panel'
-          )
-        ]
-      ])
-    );
-  }
-
-  const items =
-    pending.slice(0, 20);
-
-  let message =
-    `⏳ *TÂCHES PENDING*\n\n`;
-
-  const buttons = [];
-
-  for (
-    const item of items
-  ) {
-
-    message +=
-      `👤 ${item.user.firstName || 'Utilisateur'}\n` +
-      `🆔 \`${item.task.id}\`\n` +
-      `📌 UID : \`${item.task.uid}\`\n` +
-      `💵 Reward : *${Number(item.task.reward_amount || TASK_REWARD_EUR).toFixed(2)} €*\n\n`;
-
-    buttons.push([
-      Markup.button.callback(
-        `🔎 ${item.task.id}`,
-        `admin_view:${item.task.id}`
-      )
-    ]);
-  }
-
-  if (
-    pending.length > 20
-  ) {
-
-    message +=
-      `_Affichage des 20 premières tâches._`;
-  }
-
-  buttons.push([
-    Markup.button.callback(
-      '🔄 Actualiser',
-      'admin_pending'
-    )
-  ]);
-
-  await renderScreen(
-    ctx,
-    message,
-    Markup.inlineKeyboard(
-      buttons
-    )
-  );
-}
-
-// ====================================================
-// 29. ADMIN - VIEW TASK
-// ====================================================
-
-bot.action(
-  /^admin_view:(.+)$/,
-  async ctx => {
-
-    await ctx.answerCbQuery();
-
-    const adminId =
-      String(ctx.from.id);
-
-    if (
-      !isAdmin(adminId)
-    ) {
-
-      return renderScreen(
-        ctx,
-        `⛔ Accès administrateur refusé.`
-      );
-    }
-
-    const taskId =
-      ctx.match[1];
-
-    const result =
-      findPendingTask(taskId);
-
-    if (!result) {
-
-      return renderScreen(
-
-        ctx,
-
-        `⚠️ *Tâche introuvable.*\n\n` +
-        `Elle a peut-être déjà été validée ou rejetée.`,
-
-        Markup.inlineKeyboard([
-          [
-            Markup.button.callback(
-              '🔄 PENDING',
-              'admin_pending'
-            )
-          ]
-        ])
-      );
-    }
-
-    const {
-      user,
-      task
-    } = result;
-
-    await renderScreen(
-
-      ctx,
-
-      `🔎 *DÉTAIL DE LA TÂCHE*\n\n` +
-
-      `🆔 Task ID : \`${task.id}\`\n` +
-
-      `👤 Worker : *${user.firstName || 'Utilisateur'}*\n` +
-
-      `📱 Username : @${task.telegramUsername || 'utilisateur'}\n` +
-
-      `🆔 Telegram ID : \`${task.telegramUserId}\`\n` +
-
-      `📌 UID : \`${task.uid}\`\n\n` +
-
-      `📋 Type : *${task.taskType}*\n` +
-
-      `📌 Statut : *PENDING*\n` +
-
-      `💵 Reward : *${Number(task.reward_amount || TASK_REWARD_EUR).toFixed(2)} €*\n\n` +
-
-      `📅 Reçue : ${new Date(task.timestamp).toLocaleString()}\n\n` +
-
-      `Choisissez la décision administrative :`,
-
-      Markup.inlineKeyboard([
-
-        [
-          Markup.button.callback(
-            '✅ VALIDER',
-            `admin_validate:${task.id}`
-          ),
-
-          Markup.button.callback(
-            '❌ REJETER',
-            `admin_reject:${task.id}`
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '🔙 Retour PENDING',
-            'admin_pending'
-          )
-        ]
-      ])
-    );
-  }
-);
-
-// ====================================================
-// 30. ADMIN VALIDATE
-// ====================================================
-
-bot.action(
-  /^admin_validate:(.+)$/,
-  async ctx => {
-
-    await ctx.answerCbQuery();
-
-    const adminId =
-      String(ctx.from.id);
-
-    if (
-      !isAdmin(adminId)
-    ) {
-
-      return renderScreen(
-        ctx,
-        `⛔ Accès administrateur refusé.`
-      );
-    }
-
-    const taskId =
-      ctx.match[1];
-
-    const result =
-      findPendingTask(taskId);
-
-    if (!result) {
-
-      return renderScreen(
-
-        ctx,
-
-        `⚠️ *Tâche introuvable ou déjà traitée.*`,
-
-        Markup.inlineKeyboard([
-          [
-            Markup.button.callback(
-              '🔄 PENDING',
-              'admin_pending'
-            )
-          ]
-        ])
-      );
-    }
-
-    const {
-      user,
-      task,
-      taskIndex
-    } = result;
-
-    // ==================================================
-    // DOUBLE VALIDATION PROTECTION
-    // ==================================================
-
-    if (
-      task.validation_status !==
-        'pending' &&
-      task.status !==
-        'pending'
-    ) {
-
-      return renderScreen(
-        ctx,
-        `⚠️ Cette tâche a déjà été traitée.`
-      );
-    }
-
-    const now =
-      new Date().toISOString();
-
-    const reward =
-      Number(
-        task.reward_amount ||
-        TASK_REWARD_EUR
-      );
-
-    // ==================================================
-    // UPDATE VALIDATION
-    // ==================================================
-
-    task.status =
-      'validated';
-
-    task.validation_status =
-      'validated';
-
-    task.validated_at =
-      now;
-
-    task.validated_by =
-      adminId;
-
-    task.validation_reason =
-      null;
-
-    task.reward_paid =
-      true;
-
-    task.reward_paid_at =
-      now;
-
-    /*
-     * account_created remains unchanged here.
-     *
-     * Validation admin ≠ automatic account creation.
-     */
-    task.account_created =
-      Boolean(
-        task.account_created
-      );
-
-    // ==================================================
-    // CREDIT WORKER
-    // ==================================================
-
-    user.balance =
-      Number(user.balance || 0) +
-      reward;
-
-    user.tasksCompleted =
-      Number(user.tasksCompleted || 0) +
-      1;
-
-    // ==================================================
-    // REFERRAL COMMISSION
-    // ==================================================
-
-    if (
-      user.referredBy &&
-      userLedger[user.referredBy]
-    ) {
-
-      const referrer =
-        userLedger[
-          user.referredBy
-        ];
-
-      referrer.balance =
-        Number(
-          referrer.balance || 0
-        ) +
-        REFERRAL_COMMISSION_EUR;
-
-      referrer.referralEarnings =
-        Number(
-          referrer.referralEarnings || 0
-        ) +
-        REFERRAL_COMMISSION_EUR;
-
-      console.log(
-        `[Referral Reward] ` +
-        `referrer=${user.referredBy} ` +
-        `amount=${REFERRAL_COMMISSION_EUR}`
-      );
-
-      try {
-
-        await bot.telegram.sendMessage(
-
-          String(
-            user.referredBy
-          ),
-
-          `🎉 *Commission de parrainage*\n\n` +
-
-          `Une tâche de votre filleul a été validée.\n\n` +
-
-          `💎 Commission : ` +
-          `*+${REFERRAL_COMMISSION_EUR.toFixed(2)} €*\n\n` +
-
-          `💰 Votre solde a été mis à jour.`,
-
-          {
-            parse_mode: 'Markdown'
-          }
-        );
-
-      } catch (notifyError) {
-
-        console.warn(
-          '[Referral Notification]',
-          notifyError.message
-        );
-      }
-    }
-
-    // ==================================================
-    // GOOGLE SHEETS UPDATE
-    // ==================================================
-
-    const sheetResult =
-      await syncToGoogleSheets({
-
-        ...task,
-
-        syncAction:
-          'update_validation',
-
-        status:
-          'validated',
-
-        validation_status:
-          'validated',
-
-        reward_paid:
-          true,
-
-        reward_paid_at:
-          now,
-
-        validated_at:
-          now,
-
-        validated_by:
-          adminId,
-
-        validation_reason:
-          null,
-
-        reward_amount:
-          reward
-      });
-
-    // ==================================================
-    // REMOVE FROM PENDING
-    // ==================================================
-
-    user.pendingTasks.splice(
-      taskIndex,
-      1
-    );
-
-    // ==================================================
-    // WORKER NOTIFICATION
-    // ==================================================
-
-    try {
-
-      await bot.telegram.sendMessage(
-
-        String(
-          user.userId
-        ),
-
-        `🎉 *TÂCHE VALIDÉE !*\n\n` +
-
-        `🆔 Task ID : \`${task.id}\`\n` +
-
-        `📌 Statut : *VALIDATED* ✅\n\n` +
-
-        `💰 Reward crédité : ` +
-        `*+${reward.toFixed(2)} €*\n\n` +
-
-        `💵 Nouveau solde : ` +
-        `*${Number(user.balance).toFixed(2)} €*\n\n` +
-
-        `Merci pour votre soumission.`,
-
-        {
-          parse_mode: 'Markdown'
-        }
-      );
-
-    } catch (notifyError) {
-
-      console.warn(
-        '[Worker Notification]',
-        notifyError.message
-      );
-    }
-
-    // ==================================================
-    // ADMIN RESPONSE
-    // ==================================================
-
-    await renderScreen(
-
-      ctx,
-
-      `✅ *TÂCHE VALIDÉE*\n\n` +
-
-      `🆔 \`${task.id}\`\n` +
-
-      `👤 Worker : ${user.firstName}\n` +
-
-      `💵 Reward : *+${reward.toFixed(2)} €*\n\n` +
-
-      `💰 Nouveau solde worker : ` +
-      `*${Number(user.balance).toFixed(2)} €*\n\n` +
-
-      `🛡️ Validé par : \`${adminId}\`\n` +
-
-      `📅 ${now}\n\n` +
-
-      `Google Sheets : ` +
-      `${sheetResult.success ? '✅ Sync OK' : '⚠️ Sync à vérifier'}`,
-
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '⏳ Voir PENDING',
-            'admin_pending'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '🛡️ Admin',
-            'admin_panel'
-          )
-        ]
-      ])
-    );
-
-    console.log(
-      `[TASK VALIDATED] ` +
-      `task=${task.id} ` +
-      `worker=${user.userId} ` +
-      `reward=${reward} ` +
-      `admin=${adminId}`
-    );
-  }
-);
-
-// ====================================================
-// 31. ADMIN REJECT
-// ====================================================
-
-bot.action(
-  /^admin_reject:(.+)$/,
-  async ctx => {
-
-    await ctx.answerCbQuery();
-
-    const adminId =
-      String(ctx.from.id);
-
-    if (
-      !isAdmin(adminId)
-    ) {
-
-      return renderScreen(
-        ctx,
-        `⛔ Accès administrateur refusé.`
-      );
-    }
-
-    const taskId =
-      ctx.match[1];
-
-    const result =
-      findPendingTask(taskId);
-
-    if (!result) {
-
-      return renderScreen(
-
-        ctx,
-
-        `⚠️ *Tâche introuvable ou déjà traitée.*`,
-
-        Markup.inlineKeyboard([
-          [
-            Markup.button.callback(
-              '🔄 PENDING',
-              'admin_pending'
-            )
-          ]
-        ])
-      );
-    }
-
-    const {
-      user,
-      task,
-      taskIndex
-    } = result;
-
-    if (
-      task.validation_status !==
-        'pending' &&
-      task.status !==
-        'pending'
-    ) {
-
-      return renderScreen(
-        ctx,
-        `⚠️ Cette tâche a déjà été traitée.`
-      );
-    }
-
-    const now =
-      new Date().toISOString();
-
-    const reason =
-      'Soumission rejetée par l’administration après vérification.';
-
-    // ==================================================
-    // UPDATE
-    // ==================================================
-
-    task.status =
-      'rejected';
-
-    task.validation_status =
-      'rejected';
-
-    task.validated_at =
-      now;
-
-    task.validated_by =
-      adminId;
-
-    task.validation_reason =
-      reason;
-
-    task.reward_paid =
-      false;
-
-    task.reward_paid_at =
-      null;
-
-    // ==================================================
-    // GOOGLE SHEETS
-    // ==================================================
-
-    const sheetResult =
-      await syncToGoogleSheets({
-
-        ...task,
-
-        syncAction:
-          'update_validation',
-
-        status:
-          'rejected',
-
-        validation_status:
-          'rejected',
-
-        reward_paid:
-          false,
-
-        reward_paid_at:
-          null,
-
-        validated_at:
-          now,
-
-        validated_by:
-          adminId,
-
-        validation_reason:
-          reason
-      });
-
-    // ==================================================
-    // REMOVE FROM PENDING
-    // ==================================================
-
-    user.pendingTasks.splice(
-      taskIndex,
-      1
-    );
-
-    // ==================================================
-    // NOTIFY WORKER
-    // ==================================================
-
-    try {
-
-      await bot.telegram.sendMessage(
-
-        String(
-          user.userId
-        ),
-
-        `❌ *TÂCHE REJETÉE*\n\n` +
-
-        `🆔 Task ID : \`${task.id}\`\n` +
-
-        `📌 Statut : *REJECTED*\n\n` +
-
-        `📝 Motif :\n` +
-        `${reason}\n\n` +
-
-        `💰 Reward : *0.00 €*\n\n` +
-
-        `ℹ️ Aucun montant n'a été ajouté à votre solde.`,
-
-        {
-          parse_mode: 'Markdown'
-        }
-      );
-
-    } catch (notifyError) {
-
-      console.warn(
-        '[Worker Notification]',
-        notifyError.message
-      );
-    }
-
-    // ==================================================
-    // ADMIN RESPONSE
-    // ==================================================
-
-    await renderScreen(
-
-      ctx,
-
-      `❌ *TÂCHE REJETÉE*\n\n` +
-
-      `🆔 \`${task.id}\`\n` +
-
-      `👤 Worker : ${user.firstName}\n\n` +
-
-      `📝 Motif :\n${reason}\n\n` +
-
-      `💰 Reward : *0.00 €*\n\n` +
-
-      `🛡️ Décision par : \`${adminId}\`\n` +
-
-      `Google Sheets : ` +
-      `${sheetResult.success ? '✅ Sync OK' : '⚠️ Sync à vérifier'}`,
-
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '⏳ Voir PENDING',
-            'admin_pending'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '🛡️ Admin',
-            'admin_panel'
-          )
-        ]
-      ])
-    );
-
-    console.log(
-      `[TASK REJECTED] ` +
-      `task=${task.id} ` +
-      `worker=${user.userId} ` +
-      `admin=${adminId}`
-    );
-  }
-);
-
-// ====================================================
-// 32. BALANCE CALLBACK
-// ====================================================
-
-bot.action(
-  'action_check_balance',
-  async ctx => {
-
-    await ctx.answerCbQuery();
-
-    const userId =
-      String(ctx.from.id);
-
-    const user =
-      getUserData(
-        userId,
-        ctx.from.username,
-        ctx.from.first_name
-      );
-
-    const pendingTasks =
-      Array.isArray(
-        user.pendingTasks
-      )
-        ? user.pendingTasks.filter(
-            task =>
-              task.validation_status ===
-                'pending' ||
-              task.status ===
-                'pending'
-          )
-        : [];
-
-    const pendingAmount =
-      pendingTasks.reduce(
-        (total, task) =>
-          total +
-          Number(
-            task.reward_amount || 0
-          ),
-        0
-      );
-
-    await renderScreen(
-
-      ctx,
-
-      `💰 *Votre Solde*\n\n` +
-
-      `💵 Solde disponible : ` +
-      `*${Number(user.balance || 0).toFixed(2)} €*\n\n` +
-
-      `📊 Tâches validées : ` +
-      `*${user.tasksCompleted || 0}*\n\n` +
-
-      `⏳ Tâches PENDING : ` +
-      `*${pendingTasks.length}*\n\n` +
-
-      `💶 Reward en attente : ` +
-      `*${pendingAmount.toFixed(2)} €*\n\n` +
-
-      `ℹ️ Les rewards PENDING seront crédités uniquement après validation administrative.`,
-
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '📋 Mes tâches',
             'action_my_tasks'
           )
         ],
@@ -3482,8 +2907,143 @@ bot.action(
 
         [
           Markup.button.callback(
-            '🏦 Retrait',
-            'action_request_withdrawal'
+            '💰 Mon solde',
+            'action_check_balance'
+          )
+        ]
+
+      ])
+    );
+  }
+);
+
+// ============================================================
+// 29. ADMIN PANEL
+// ============================================================
+
+bot.command(
+  'admin',
+  async ctx => {
+
+    const adminId =
+      String(
+        ctx.from?.id || ''
+      );
+
+    if (
+      !isAdmin(adminId)
+    ) {
+
+      return ctx.reply(
+        '⛔ Accès administrateur refusé.'
+      );
+    }
+
+    const result =
+      await dbQuery(
+        `
+        SELECT COUNT(*)::int AS count
+
+        FROM tasks
+
+        WHERE validation_status =
+          'pending'
+        `
+      );
+
+    const count =
+      Number(
+        result.rows[0]?.count || 0
+      );
+
+    await ctx.reply(
+
+      `🛡️ *ADMIN PANEL*\n\n` +
+
+      `⏳ Tâches PENDING : *${count}*\n\n` +
+
+      `Sélectionnez une action :`,
+
+      {
+        parse_mode: 'Markdown',
+
+        ...Markup.inlineKeyboard([
+
+          [
+            Markup.button.callback(
+              '⏳ Voir PENDING',
+              'admin_pending'
+            )
+          ],
+
+          [
+            Markup.button.callback(
+              '🔄 Actualiser',
+              'admin_panel'
+            )
+          ]
+
+        ])
+      }
+    );
+  }
+);
+
+// ============================================================
+// ADMIN PANEL CALLBACK
+// ============================================================
+
+bot.action(
+  'admin_panel',
+  async ctx => {
+
+    await ctx.answerCbQuery();
+
+    const adminId =
+      String(
+        ctx.from?.id || ''
+      );
+
+    if (
+      !isAdmin(adminId)
+    ) {
+
+      return renderScreen(
+        ctx,
+        '⛔ Accès refusé.'
+      );
+    }
+
+    const result =
+      await dbQuery(
+        `
+        SELECT COUNT(*)::int AS count
+
+        FROM tasks
+
+        WHERE validation_status =
+          'pending'
+        `
+      );
+
+    const count =
+      Number(
+        result.rows[0]?.count || 0
+      );
+
+    await renderScreen(
+
+      ctx,
+
+      `🛡️ *ADMIN PANEL*\n\n` +
+
+      `⏳ Tâches PENDING : *${count}*`,
+
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback(
+            '⏳ Voir PENDING',
+            'admin_pending'
           )
         ]
       ])
@@ -3491,9 +3051,1499 @@ bot.action(
   }
 );
 
-// ====================================================
-// 33. WITHDRAWAL CALLBACK
-// ====================================================
+// ============================================================
+// 30. ADMIN PENDING
+// ============================================================
+
+bot.command(
+  'pending',
+  async ctx => {
+
+    const adminId =
+      String(
+        ctx.from?.id || ''
+      );
+
+    if (
+      !isAdmin(adminId)
+    ) {
+
+      return ctx.reply(
+        '⛔ Accès refusé.'
+      );
+    }
+
+    return showAdminPending(
+      ctx
+    );
+  }
+);
+
+bot.action(
+  'admin_pending',
+  async ctx => {
+
+    await ctx.answerCbQuery();
+
+    const adminId =
+      String(
+        ctx.from?.id || ''
+      );
+
+    if (
+      !isAdmin(adminId)
+    ) {
+
+      return renderScreen(
+        ctx,
+        '⛔ Accès refusé.'
+      );
+    }
+
+    return showAdminPending(
+      ctx
+    );
+  }
+);
+
+async function showAdminPending(
+  ctx
+) {
+
+  const result =
+    await dbQuery(
+      `
+      SELECT
+
+        task_id,
+
+        telegram_user_id,
+
+        telegram_username,
+
+        task_type,
+
+        uid,
+
+        first_name,
+
+        last_name,
+
+        reward_usd,
+
+        status,
+
+        validation_status,
+
+        created_at
+
+      FROM tasks
+
+      WHERE validation_status =
+        'pending'
+
+      ORDER BY created_at ASC
+
+      LIMIT 30
+      `
+    );
+
+  if (
+    result.rows.length === 0
+  ) {
+
+    return renderScreen(
+
+      ctx,
+
+      `⏳ *PENDING*\n\n` +
+      `Aucune tâche en attente.`,
+
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback(
+            '🔄 Actualiser',
+            'admin_pending'
+          )
+        ]
+      ])
+    );
+  }
+
+  let message =
+    `🛡️ *TÂCHES PENDING*\n\n`;
+
+  const buttons = [];
+
+  result.rows.forEach(
+    task => {
+
+      message +=
+
+        `⏳ \`${task.task_id}\`\n` +
+
+        `👤 User: \`${task.telegram_user_id}\`\n` +
+
+        `🆔 UID: \`${task.uid || '-'}\`\n` +
+
+        `💵 Reward: \`${Number(task.reward_usd || 0).toFixed(2)} €\`\n\n`;
+
+      buttons.push([
+        Markup.button.callback(
+          `🔎 ${task.task_id}`,
+          `admin_view:${task.task_id}`
+        )
+      ]);
+    }
+  );
+
+  buttons.push([
+    Markup.button.callback(
+      '🔄 Actualiser',
+      'admin_pending'
+    )
+  ]);
+
+  return renderScreen(
+
+    ctx,
+
+    message,
+
+    Markup.inlineKeyboard(
+      buttons
+    )
+  );
+}
+
+// ============================================================
+// 31. ADMIN VIEW TASK
+// ============================================================
+
+bot.action(
+  /^admin_view:(.+)$/,
+  async ctx => {
+
+    await ctx.answerCbQuery();
+
+    const adminId =
+      String(
+        ctx.from?.id || ''
+      );
+
+    if (
+      !isAdmin(adminId)
+    ) {
+
+      return renderScreen(
+        ctx,
+        '⛔ Accès refusé.'
+      );
+    }
+
+    const taskId =
+      ctx.match[1];
+
+    const result =
+      await dbQuery(
+        `
+        SELECT *
+
+        FROM tasks
+
+        WHERE task_id = $1
+
+        LIMIT 1
+        `,
+        [taskId]
+      );
+
+    if (
+      result.rows.length === 0
+    ) {
+
+      return renderScreen(
+        ctx,
+        `❌ Tâche introuvable.`
+      );
+    }
+
+    const task =
+      result.rows[0];
+
+    await renderScreen(
+
+      ctx,
+
+      `🔎 *DÉTAIL TÂCHE*\n\n` +
+
+      `🆔 Task ID : \`${task.task_id}\`\n` +
+
+      `👤 Telegram ID : \`${task.telegram_user_id}\`\n` +
+
+      `🆔 UID : \`${task.uid || '-'}\`\n` +
+
+      `👤 Nom : ${task.first_name || '-'} ${task.last_name || ''}\n` +
+
+      `📋 Type : ${task.task_type || '-'}\n` +
+
+      `📌 Statut : *${task.validation_status || task.status}*\n` +
+
+      `💵 Reward : *${Number(task.reward_usd || 0).toFixed(2)} €*\n` +
+
+      `📅 Créé : ${new Date(task.created_at).toLocaleString('fr-FR')}\n\n` +
+
+      `Choisissez la décision :`,
+
+      Markup.inlineKeyboard([
+
+        [
+          Markup.button.callback(
+            '✅ VALIDER',
+            `admin_validate:${task.task_id}`
+          )
+        ],
+
+        [
+          Markup.button.callback(
+            '❌ REJETER',
+            `admin_reject:${task.task_id}`
+          )
+        ],
+
+        [
+          Markup.button.callback(
+            '🔙 Retour PENDING',
+            'admin_pending'
+          )
+        ]
+
+      ])
+    );
+  }
+);
+
+// ============================================================
+// 32. ADMIN VALIDATE
+// ============================================================
+
+bot.action(
+  /^admin_validate:(.+)$/,
+  async ctx => {
+
+    await ctx.answerCbQuery();
+
+    const adminTelegramId =
+      String(
+        ctx.from?.id || ''
+      );
+
+    if (
+      !isAdmin(adminTelegramId)
+    ) {
+
+      return renderScreen(
+        ctx,
+        '⛔ Accès refusé.'
+      );
+    }
+
+    const taskId =
+      ctx.match[1];
+
+    const client =
+      await pool.connect();
+
+    try {
+
+      await client.query(
+        'BEGIN'
+      );
+
+      const taskResult =
+        await client.query(
+          `
+          SELECT *
+
+          FROM tasks
+
+          WHERE task_id = $1
+
+          FOR UPDATE
+          `,
+          [taskId]
+        );
+
+      if (
+        taskResult.rows.length === 0
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+        return renderScreen(
+          ctx,
+          '❌ Tâche introuvable.'
+        );
+      }
+
+      const task =
+        taskResult.rows[0];
+
+      // ------------------------------------------------------
+      // DOUBLE VALIDATION PROTECTION
+      // ------------------------------------------------------
+
+      if (
+        task.validation_status ===
+          'validated' ||
+
+        task.reward_paid === true
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+        return renderScreen(
+
+          ctx,
+
+          `⚠️ Cette tâche a déjà été validée.`,
+
+          Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                '🔙 PENDING',
+                'admin_pending'
+              )
+            ]
+          ])
+        );
+      }
+
+      // ------------------------------------------------------
+      // GET ADMIN DATABASE USER ID
+      // ------------------------------------------------------
+
+      const adminUserResult =
+        await client.query(
+          `
+          SELECT id
+
+          FROM users
+
+          WHERE telegram_user_id = $1
+
+          LIMIT 1
+          `,
+          [adminTelegramId]
+        );
+
+      let validatorDbId =
+        null;
+
+      if (
+        adminUserResult.rows.length > 0
+      ) {
+
+        validatorDbId =
+          adminUserResult.rows[0].id;
+      }
+
+      // ------------------------------------------------------
+      // UPDATE TASK
+      // ------------------------------------------------------
+
+      const now =
+        new Date();
+
+      const reward =
+        Number(
+          task.reward_usd ||
+          TASK_REWARD_EUR
+        );
+
+      const updatedTask =
+        await client.query(
+          `
+          UPDATE tasks
+
+          SET
+
+            status =
+              'validated',
+
+            validation_status =
+              'validated',
+
+            validation_reason =
+              NULL,
+
+            validated_at =
+              NOW(),
+
+            validated_by =
+              $2,
+
+            reward_paid =
+              TRUE,
+
+            reward_paid_at =
+              NOW(),
+
+            completed_at =
+              NOW(),
+
+            account_created =
+              account_created,
+
+            account_created_at =
+              account_created_at
+
+          WHERE task_id = $1
+
+          RETURNING *
+          `,
+          [
+            taskId,
+            validatorDbId
+          ]
+        );
+
+      // ------------------------------------------------------
+      // GET WORKER
+      // ------------------------------------------------------
+
+      const workerResult =
+        await client.query(
+          `
+          SELECT *
+
+          FROM users
+
+          WHERE telegram_user_id = $1
+
+          FOR UPDATE
+          `,
+          [
+            task.telegram_user_id
+          ]
+        );
+
+      if (
+        workerResult.rows.length === 0
+      ) {
+
+        throw new Error(
+          'Worker introuvable'
+        );
+      }
+
+      const worker =
+        workerResult.rows[0];
+
+      // ------------------------------------------------------
+      // ENSURE WALLET
+      // ------------------------------------------------------
+
+      const walletResult =
+        await client.query(
+          `
+          SELECT *
+
+          FROM wallets
+
+          WHERE user_id = $1
+
+          FOR UPDATE
+          `,
+          [worker.id]
+        );
+
+      let balanceBefore =
+        0;
+
+      if (
+        walletResult.rows.length === 0
+      ) {
+
+        await client.query(
+          `
+          INSERT INTO wallets (
+            user_id,
+            balance,
+            total_earned,
+            total_withdrawn
+          )
+
+          VALUES (
+            $1,
+            0,
+            0,
+            0
+          )
+          `,
+          [worker.id]
+        );
+
+      } else {
+
+        balanceBefore =
+          Number(
+            walletResult.rows[0].balance || 0
+          );
+      }
+
+      const balanceAfter =
+        balanceBefore +
+        reward;
+
+      // ------------------------------------------------------
+      // CREDIT REWARD
+      // ------------------------------------------------------
+
+      await client.query(
+        `
+        UPDATE wallets
+
+        SET
+
+          balance =
+            $2,
+
+          total_earned =
+            total_earned + $3,
+
+          updated_at =
+            NOW()
+
+        WHERE user_id = $1
+        `,
+        [
+          worker.id,
+          balanceAfter,
+          reward
+        ]
+      );
+
+      // ------------------------------------------------------
+      // TRANSACTION
+      // ------------------------------------------------------
+
+      await client.query(
+        `
+        INSERT INTO transactions (
+
+          user_id,
+
+          task_id,
+
+          type,
+
+          amount,
+
+          balance_before,
+
+          balance_after,
+
+          description
+
+        )
+
+        VALUES (
+
+          $1,
+          $2,
+          'task_reward',
+          $3,
+          $4,
+          $5,
+          $6
+
+        )
+        `,
+        [
+
+          worker.id,
+
+          taskId,
+
+          reward,
+
+          balanceBefore,
+
+          balanceAfter,
+
+          `Reward tâche validée ${taskId}`
+        ]
+      );
+
+      // ------------------------------------------------------
+      // VALIDATION RECORD
+      // ------------------------------------------------------
+
+      const validationResult =
+        await client.query(
+          `
+          INSERT INTO task_validations (
+
+            task_id,
+
+            validator_id,
+
+            status,
+
+            reason,
+
+            validation_data,
+
+            validated_at
+
+          )
+
+          VALUES (
+
+            $1,
+            $2,
+            'validated',
+            NULL,
+            $3::jsonb,
+            NOW()
+
+          )
+
+          RETURNING id
+          `,
+          [
+
+            taskId,
+
+            validatorDbId,
+
+            JSON.stringify({
+              source: 'telegram_admin',
+              adminTelegramId,
+              reward,
+              validatedAt:
+                now.toISOString()
+            })
+          ]
+        );
+
+      const validationId =
+        validationResult.rows[0]?.id;
+
+      // ------------------------------------------------------
+      // VALIDATION REPORT
+      // ------------------------------------------------------
+
+      await client.query(
+        `
+        INSERT INTO validation_reports (
+
+          task_id,
+
+          validation_id,
+
+          result,
+
+          checks,
+
+          notes
+
+        )
+
+        VALUES (
+
+          $1,
+          $2,
+          'validated',
+          $3::jsonb,
+          $4
+
+        )
+        `,
+        [
+
+          taskId,
+
+          validationId,
+
+          JSON.stringify({
+            adminValidated: true
+          }),
+
+          'Validation effectuée depuis Telegram Admin.'
+        ]
+      );
+
+      // ------------------------------------------------------
+      // REFERRAL COMMISSION
+      // ------------------------------------------------------
+
+      if (
+        worker.referral_by &&
+        worker.referral_by !==
+          worker.telegram_user_id
+      ) {
+
+        const referrerResult =
+          await client.query(
+            `
+            SELECT *
+
+            FROM users
+
+            WHERE telegram_user_id = $1
+
+            FOR UPDATE
+            `,
+            [
+              worker.referral_by
+            ]
+          );
+
+        if (
+          referrerResult.rows.length > 0
+        ) {
+
+          const referrer =
+            referrerResult.rows[0];
+
+          let refWalletResult =
+            await client.query(
+              `
+              SELECT *
+
+              FROM wallets
+
+              WHERE user_id = $1
+
+              FOR UPDATE
+              `,
+              [referrer.id]
+            );
+
+          if (
+            refWalletResult.rows.length === 0
+          ) {
+
+            await client.query(
+              `
+              INSERT INTO wallets (
+                user_id
+              )
+
+              VALUES ($1)
+              `,
+              [referrer.id]
+            );
+
+            refWalletResult =
+              await client.query(
+                `
+                SELECT *
+
+                FROM wallets
+
+                WHERE user_id = $1
+
+                FOR UPDATE
+                `,
+                [referrer.id]
+              );
+          }
+
+          const referralBefore =
+            Number(
+              refWalletResult.rows[0].balance ||
+              0
+            );
+
+          const referralAfter =
+            referralBefore +
+            REFERRAL_COMMISSION_EUR;
+
+          await client.query(
+            `
+            UPDATE wallets
+
+            SET
+
+              balance =
+                $2,
+
+              total_earned =
+                total_earned + $3,
+
+              updated_at =
+                NOW()
+
+            WHERE user_id = $1
+            `,
+            [
+              referrer.id,
+              referralAfter,
+              REFERRAL_COMMISSION_EUR
+            ]
+          );
+
+          await client.query(
+            `
+            UPDATE users
+
+            SET
+
+              referral_earnings =
+                referral_earnings + $2,
+
+              updated_at =
+                NOW()
+
+            WHERE id = $1
+            `,
+            [
+              referrer.id,
+              REFERRAL_COMMISSION_EUR
+            ]
+          );
+
+          await client.query(
+            `
+            INSERT INTO transactions (
+
+              user_id,
+
+              task_id,
+
+              type,
+
+              amount,
+
+              balance_before,
+
+              balance_after,
+
+              description
+
+            )
+
+            VALUES (
+
+              $1,
+              $2,
+              'referral_commission',
+              $3,
+              $4,
+              $5,
+              $6
+
+            )
+            `,
+            [
+
+              referrer.id,
+
+              taskId,
+
+              REFERRAL_COMMISSION_EUR,
+
+              referralBefore,
+
+              referralAfter,
+
+              `Commission parrainage pour ${taskId}`
+            ]
+          );
+        }
+      }
+
+      await client.query(
+        'COMMIT'
+      );
+
+      // ------------------------------------------------------
+      // GOOGLE SHEETS UPDATE
+      // ------------------------------------------------------
+
+      await syncToGoogleSheets({
+
+        syncAction:
+          'update_validation',
+
+        id:
+          taskId,
+
+        uid:
+          task.uid,
+
+        firstName:
+          task.first_name,
+
+        lastName:
+          task.last_name,
+
+        telegramUserId:
+          task.telegram_user_id,
+
+        status:
+          'validated',
+
+        validation_status:
+          'validated',
+
+        validation_reason:
+          null,
+
+        validated_at:
+          now.toISOString(),
+
+        validated_by:
+          adminTelegramId,
+
+        reward_amount:
+          reward,
+
+        reward_paid:
+          true,
+
+        reward_paid_at:
+          now.toISOString(),
+
+        account_created:
+          Boolean(
+            task.account_created
+          ),
+
+        account_created_at:
+          task.account_created_at,
+
+        taskType:
+          task.task_type,
+
+        notes:
+          `Tâche validée par administrateur.`
+      });
+
+      // ------------------------------------------------------
+      // WORKER NOTIFICATION
+      // ------------------------------------------------------
+
+      try {
+
+        await bot.telegram.sendMessage(
+
+          task.telegram_user_id,
+
+          `✅ *TÂCHE VALIDÉE*\n\n` +
+
+          `🆔 Task ID : \`${taskId}\`\n` +
+
+          `📌 Statut : *VALIDATED*\n` +
+
+          `💰 Reward crédité : *${reward.toFixed(2)} €*\n\n` +
+
+          `Votre solde a été mis à jour.`,
+
+          {
+            parse_mode: 'Markdown'
+          }
+        );
+
+      } catch (notificationError) {
+
+        console.warn(
+          '[Telegram Notification]',
+          notificationError.message
+        );
+      }
+
+      await renderScreen(
+
+        ctx,
+
+        `✅ *TÂCHE VALIDÉE*\n\n` +
+
+        `🆔 \`${taskId}\`\n` +
+
+        `💰 Reward : *${reward.toFixed(2)} €*\n\n` +
+
+        `Le reward a été crédité au worker.`,
+
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback(
+              '⏳ PENDING',
+              'admin_pending'
+            )
+          ],
+
+          [
+            Markup.button.callback(
+              '🛡️ Admin',
+              'admin_panel'
+            )
+          ]
+        ])
+      );
+
+    } catch (error) {
+
+      try {
+        await client.query(
+          'ROLLBACK'
+        );
+      } catch (_) {}
+
+      console.error(
+        '[ADMIN VALIDATE ERROR]',
+        error
+      );
+
+      await renderScreen(
+
+        ctx,
+
+        `❌ *Erreur de validation*\n\n` +
+        `${error.message}`,
+
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback(
+              '🔙 Retour',
+              'admin_pending'
+            )
+          ]
+        ])
+      );
+
+    } finally {
+
+      client.release();
+    }
+  }
+);
+
+// ============================================================
+// 33. ADMIN REJECT
+// ============================================================
+
+bot.action(
+  /^admin_reject:(.+)$/,
+  async ctx => {
+
+    await ctx.answerCbQuery();
+
+    const adminTelegramId =
+      String(
+        ctx.from?.id || ''
+      );
+
+    if (
+      !isAdmin(adminTelegramId)
+    ) {
+
+      return renderScreen(
+        ctx,
+        '⛔ Accès refusé.'
+      );
+    }
+
+    const taskId =
+      ctx.match[1];
+
+    const client =
+      await pool.connect();
+
+    try {
+
+      await client.query(
+        'BEGIN'
+      );
+
+      const taskResult =
+        await client.query(
+          `
+          SELECT *
+
+          FROM tasks
+
+          WHERE task_id = $1
+
+          FOR UPDATE
+          `,
+          [taskId]
+        );
+
+      if (
+        taskResult.rows.length === 0
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+        return renderScreen(
+          ctx,
+          '❌ Tâche introuvable.'
+        );
+      }
+
+      const task =
+        taskResult.rows[0];
+
+      if (
+        task.validation_status ===
+          'validated' ||
+
+        task.reward_paid === true
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+        return renderScreen(
+          ctx,
+          `⚠️ Cette tâche est déjà validée.`
+        );
+      }
+
+      const adminResult =
+        await client.query(
+          `
+          SELECT id
+
+          FROM users
+
+          WHERE telegram_user_id = $1
+
+          LIMIT 1
+          `,
+          [adminTelegramId]
+        );
+
+      const validatorId =
+        adminResult.rows[0]?.id ||
+        null;
+
+      const reason =
+        'Soumission rejetée par l’administration après vérification.';
+
+      const now =
+        new Date();
+
+      const validationResult =
+        await client.query(
+          `
+          INSERT INTO task_validations (
+
+            task_id,
+
+            validator_id,
+
+            status,
+
+            reason,
+
+            validation_data,
+
+            validated_at
+
+          )
+
+          VALUES (
+
+            $1,
+            $2,
+            'rejected',
+            $3,
+            $4::jsonb,
+            NOW()
+
+          )
+
+          RETURNING id
+          `,
+          [
+
+            taskId,
+
+            validatorId,
+
+            reason,
+
+            JSON.stringify({
+              source: 'telegram_admin',
+              adminTelegramId,
+              rejectedAt:
+                now.toISOString()
+            })
+          ]
+        );
+
+      const validationId =
+        validationResult.rows[0]?.id;
+
+      await client.query(
+        `
+        UPDATE tasks
+
+        SET
+
+          status =
+            'rejected',
+
+          validation_status =
+            'rejected',
+
+          validation_reason =
+            $2,
+
+          validated_at =
+            NOW(),
+
+          validated_by =
+            $3,
+
+          reward_paid =
+            FALSE,
+
+          reward_paid_at =
+            NULL
+
+        WHERE task_id = $1
+        `,
+        [
+
+          taskId,
+
+          reason,
+
+          validatorId
+        ]
+      );
+
+      await client.query(
+        `
+        INSERT INTO validation_reports (
+
+          task_id,
+
+          validation_id,
+
+          result,
+
+          checks,
+
+          notes
+
+        )
+
+        VALUES (
+
+          $1,
+          $2,
+          'rejected',
+          $3::jsonb,
+          $4
+
+        )
+        `,
+        [
+
+          taskId,
+
+          validationId,
+
+          JSON.stringify({
+            adminValidated: false
+          }),
+
+          reason
+        ]
+      );
+
+      await client.query(
+        'COMMIT'
+      );
+
+      // ------------------------------------------------------
+      // GOOGLE SHEETS
+      // ------------------------------------------------------
+
+      await syncToGoogleSheets({
+
+        syncAction:
+          'update_validation',
+
+        id:
+          taskId,
+
+        uid:
+          task.uid,
+
+        firstName:
+          task.first_name,
+
+        lastName:
+          task.last_name,
+
+        telegramUserId:
+          task.telegram_user_id,
+
+        status:
+          'rejected',
+
+        validation_status:
+          'rejected',
+
+        validation_reason:
+          reason,
+
+        validated_at:
+          now.toISOString(),
+
+        validated_by:
+          adminTelegramId,
+
+        reward_amount:
+          Number(
+            task.reward_usd ||
+            TASK_REWARD_EUR
+          ),
+
+        reward_paid:
+          false,
+
+        reward_paid_at:
+          null,
+
+        account_created:
+          false,
+
+        taskType:
+          task.task_type,
+
+        notes:
+          `Tâche rejetée par administrateur.`
+      });
+
+      // ------------------------------------------------------
+      // WORKER NOTIFICATION
+      // ------------------------------------------------------
+
+      try {
+
+        await bot.telegram.sendMessage(
+
+          task.telegram_user_id,
+
+          `❌ *TÂCHE REJETÉE*\n\n` +
+
+          `🆔 Task ID : \`${taskId}\`\n` +
+
+          `📌 Statut : *REJECTED*\n\n` +
+
+          `📝 Motif :\n` +
+
+          `${reason}\n\n` +
+
+          `💰 Aucun reward n'a été crédité.`,
+
+          {
+            parse_mode: 'Markdown'
+          }
+        );
+
+      } catch (notificationError) {
+
+        console.warn(
+          '[Telegram Notification]',
+          notificationError.message
+        );
+      }
+
+      await renderScreen(
+
+        ctx,
+
+        `❌ *TÂCHE REJETÉE*\n\n` +
+
+        `🆔 \`${taskId}\`\n\n` +
+
+        `📝 ${reason}\n\n` +
+
+        `💰 Aucun reward crédité.`,
+
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback(
+              '⏳ PENDING',
+              'admin_pending'
+            )
+          ]
+        ])
+      );
+
+    } catch (error) {
+
+      try {
+        await client.query(
+          'ROLLBACK'
+        );
+      } catch (_) {}
+
+      console.error(
+        '[ADMIN REJECT ERROR]',
+        error
+      );
+
+      await renderScreen(
+
+        ctx,
+
+        `❌ *Erreur lors du rejet*\n\n` +
+        `${error.message}`,
+
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback(
+              '🔙 Retour',
+              'admin_pending'
+            )
+          ]
+        ])
+      );
+
+    } finally {
+
+      client.release();
+    }
+  }
+);
+
+// ============================================================
+// 34. BALANCE CALLBACK
+// ============================================================
+
+bot.action(
+  'action_check_balance',
+  async ctx => {
+
+    await ctx.answerCbQuery();
+
+    return handleBalanceMenu(
+      ctx
+    );
+  }
+);
+
+// ============================================================
+// 35. WITHDRAW CALLBACKS
+// ============================================================
 
 bot.action(
   'action_request_withdrawal',
@@ -3501,79 +4551,11 @@ bot.action(
 
     await ctx.answerCbQuery();
 
-    const userId =
-      String(ctx.from.id);
-
-    const user =
-      getUserData(
-        userId,
-        ctx.from.username,
-        ctx.from.first_name
-      );
-
-    if (
-      Number(user.balance || 0) <
-      MIN_WITHDRAWAL_EUR
-    ) {
-
-      return renderScreen(
-
-        ctx,
-
-        `⚠️ *Solde insuffisant*\n\n` +
-
-        `Solde : *${Number(user.balance || 0).toFixed(2)} €*\n` +
-
-        `Minimum : *${MIN_WITHDRAWAL_EUR.toFixed(2)} €*\n\n` +
-
-        `Les tâches PENDING ne sont pas comptabilisées pour le retrait.`,
-
-        Markup.inlineKeyboard([
-          [
-            Markup.button.callback(
-              '🚀 Faire une tâche',
-              'task_facebook'
-            )
-          ]
-        ])
-      );
-    }
-
-    await renderScreen(
-
-      ctx,
-
-      `🏦 *Sélectionnez votre méthode de retrait*`,
-
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '📱 Mobile Money',
-            'withdraw_mobile_money'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '🪙 USDT',
-            'withdraw_crypto'
-          )
-        ],
-
-        [
-          Markup.button.callback(
-            '💳 Virement bancaire',
-            'withdraw_bank'
-          )
-        ]
-      ])
+    return handleWithdrawalMenu(
+      ctx
     );
   }
 );
-
-// ====================================================
-// 34. WITHDRAWAL METHODS
-// ====================================================
 
 bot.action(
   'withdraw_mobile_money',
@@ -3587,7 +4569,9 @@ bot.action(
 
       `📱 *Retrait Mobile Money*\n\n` +
 
-      `Contactez le support officiel pour transmettre les informations nécessaires.`,
+      `Solde disponible selon votre compte.\n\n` +
+
+      `Contactez le support officiel pour transmettre votre demande.`,
 
       Markup.inlineKeyboard([
         [
@@ -3620,7 +4604,7 @@ bot.action(
 
       `🪙 *Retrait USDT*\n\n` +
 
-      `Contactez le support officiel pour transmettre les informations nécessaires.`,
+      `Contactez le support officiel pour votre demande de retrait.`,
 
       Markup.inlineKeyboard([
         [
@@ -3651,9 +4635,9 @@ bot.action(
 
       ctx,
 
-      `💳 *Virement bancaire*\n\n` +
+      `💳 *Virement Bancaire*\n\n` +
 
-      `Contactez le support officiel pour connaître la procédure.`,
+      `Contactez le support officiel pour votre demande.`,
 
       Markup.inlineKeyboard([
         [
@@ -3674,9 +4658,9 @@ bot.action(
   }
 );
 
-// ====================================================
-// 35. FAQ
-// ====================================================
+// ============================================================
+// 36. FAQ
+// ============================================================
 
 bot.action(
   'action_faq',
@@ -3690,17 +4674,17 @@ bot.action(
 
       `❓ *FAQ*\n\n` +
 
-      `*Q1 : Combien de temps prend la validation ?*\n` +
+      `*Q1 : Quand ma tâche est-elle validée ?*\n\n` +
 
-      `R : Après soumission, la tâche passe d'abord en *PENDING*. Un administrateur doit ensuite la vérifier.\n\n` +
+      `R : Après soumission, la tâche passe d'abord en *PENDING*. Un administrateur effectue ensuite la vérification.\n\n` +
 
-      `*Q2 : Quand le reward est-il crédité ?*\n` +
+      `*Q2 : Quand suis-je payé ?*\n\n` +
 
-      `R : Uniquement après validation administrative.\n\n` +
+      `R : Le reward est crédité uniquement lorsque la tâche passe en *VALIDATED*.\n\n` +
 
-      `*Q3 : Que se passe-t-il si la tâche est rejetée ?*\n` +
+      `*Q3 : Que se passe-t-il si la tâche est rejetée ?*\n\n` +
 
-      `R : Le statut devient *REJECTED* et aucun reward n'est crédité.`,
+      `R : La tâche passe en *REJECTED* et aucun reward n'est crédité.`,
 
       Markup.inlineKeyboard([
         [
@@ -3721,9 +4705,9 @@ bot.action(
   }
 );
 
-// ====================================================
-// 36. CONTACT SUPPORT
-// ====================================================
+// ============================================================
+// 37. CONTACT SUPPORT
+// ============================================================
 
 bot.action(
   'action_contact_support',
@@ -3737,112 +4721,51 @@ bot.action(
 
       `📞 *Support ${PLATFORM_NAME}*\n\n` +
 
-      `Contactez le support officiel pour toute question concernant votre tâche ou votre paiement.`,
+      `Contact : @TaskifySupport`,
 
       Markup.inlineKeyboard([
         [
           Markup.button.url(
-            '💬 Ouvrir le Support',
+            '💬 Ouvrir Support',
             'https://t.me/TaskifySupport'
           )
-        ],
-
-        [
-          Markup.button.callback(
-            '🔙 Retour',
-            'task_facebook'
-          )
         ]
       ])
     );
   }
 );
 
-// ====================================================
-// 37. TASK RULES
-// ====================================================
-
-bot.action(
-  'action_task_rules',
-  async ctx => {
-
-    await ctx.answerCbQuery();
-
-    await renderScreen(
-
-      ctx,
-
-      `📋 *Consignes & Règles*\n\n` +
-
-      `1. Utilisez uniquement les informations autorisées pour votre tâche.\n\n` +
-
-      `2. Vérifiez les informations avant de soumettre.\n\n` +
-
-      `3. Ne transmettez jamais de mot de passe personnel ou de jeton de session dans le chat.\n\n` +
-
-      `4. Une même tâche ne doit pas être soumise plusieurs fois.\n\n` +
-
-      `5. Après soumission, le statut est *PENDING*.\n\n` +
-
-      `6. La validation est effectuée par un administrateur.\n\n` +
-
-      `7. Le reward est crédité uniquement après *VALIDATED*.`,
-
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '✅ Compris',
-            'task_facebook'
-          )
-        ]
-      ])
-    );
-  }
-);
-
-// ====================================================
-// 38. ERROR HANDLING
-// ====================================================
-
-bot.catch(
-  (err, ctx) => {
-
-    console.error(
-      `[Telegraf Error] ` +
-      `user=${ctx.from?.id}:`,
-      err
-    );
-
-    ctx.reply(
-
-      `⚠️ Une erreur inattendue est survenue.\n\n` +
-      `Veuillez utiliser /start pour recommencer.`,
-
-      {
-        ...MAIN_REPLY_KEYBOARD
-      }
-
-    ).catch(
-      () => {}
-    );
-  }
-);
-
-// ====================================================
-// 39. HTTP HEALTH CHECK
-// ====================================================
+// ============================================================
+// 38. HEALTH CHECK
+// ============================================================
 
 const server =
   http.createServer(
-    (req, res) => {
+    async (req, res) => {
 
       if (
-        req.url === '/health' ||
-        req.url === '/'
+        req.url === '/' ||
+        req.url === '/health'
       ) {
 
+        let database =
+          false;
+
+        try {
+
+          await dbQuery(
+            'SELECT 1'
+          );
+
+          database = true;
+
+        } catch (error) {
+
+          database = false;
+        }
+
         res.writeHead(
-          200,
+          database ? 200 : 503,
           {
             'Content-Type':
               'application/json'
@@ -3853,67 +4776,88 @@ const server =
           JSON.stringify({
 
             status:
-              'ok',
+              database
+                ? 'ok'
+                : 'degraded',
 
             bot:
               `${PLATFORM_NAME} (@TaskifyProBot)`,
 
-            uptime:
-              process.uptime(),
+            database,
 
-            sheetsSync:
+            googleSheets:
               Boolean(
                 GOOGLE_SHEET_WEBHOOK_URL
               ),
 
-            adminsConfigured:
-              ADMIN_TELEGRAM_IDS.length,
+            uptime:
+              process.uptime(),
 
             timestamp:
               new Date().toISOString()
+
           })
         );
 
         return;
       }
 
-      res.writeHead(404);
+      res.writeHead(
+        404
+      );
 
       res.end();
     }
   );
 
-server.listen(
-  PORT,
-  () => {
+// ============================================================
+// 39. START APPLICATION
+// ============================================================
+
+async function startApplication() {
+
+  try {
+
+    await initializeBotDatabase();
+
+    await dbQuery(
+      'SELECT NOW()'
+    );
 
     console.log(
-      `[HTTP Server] Health check listening on port ${PORT}`
+      '✅ PostgreSQL connection OK'
     );
-  }
-);
 
-// ====================================================
-// 40. START BOT
-// ====================================================
+    server.listen(
+      PORT,
+      () => {
 
-bot.launch()
-  .then(() => {
+        console.log(
+          `[HTTP Server] Health check port ${PORT}`
+        );
+      }
+    );
+
+    await bot.launch();
 
     console.log(
       '===================================================='
     );
 
     console.log(
-      `🤖 [${PLATFORM_NAME}] (@TaskifyProBot) démarré !`
+      `🤖 [${PLATFORM_NAME}] Telegram Bot démarré`
     );
 
     console.log(
-      `🚀 Mode : Polling permanent`
+      `🚀 Mode : Polling`
     );
 
     console.log(
-      `🌐 Google Sheets : ${
+      `🗄️ Database : PostgreSQL ✅`
+    );
+
+    console.log(
+      `📊 Google Sheets : ${
         GOOGLE_SHEET_WEBHOOK_URL
           ? 'Configuré ✅'
           : 'Non configuré ⚠️'
@@ -3921,55 +4865,94 @@ bot.launch()
     );
 
     console.log(
-      `🛡️ Admins configurés : ${
+      `🛡️ Admin IDs : ${
         ADMIN_TELEGRAM_IDS.length
+          ? ADMIN_TELEGRAM_IDS.length
+          : 0
       }`
-    );
-
-    console.log(
-      `💰 Reward : ${TASK_REWARD_EUR.toFixed(2)} €`
     );
 
     console.log(
       '===================================================='
     );
-  })
-  .catch(err => {
+
+  } catch (error) {
 
     console.error(
-      '❌ Impossible de lancer le bot Telegram :',
-      err.message
+      '❌ Startup error:',
+      error
     );
-  });
 
-// ====================================================
-// 41. GRACEFUL SHUTDOWN
-// ====================================================
+    process.exit(1);
+  }
+}
+
+startApplication();
+
+// ============================================================
+// 40. GRACEFUL SHUTDOWN
+// ============================================================
 
 process.once(
   'SIGINT',
-  () => {
+  async () => {
 
     console.log(
-      'Arrêt du bot (SIGINT)...'
+      'Arrêt du bot...'
     );
 
-    bot.stop('SIGINT');
+    bot.stop(
+      'SIGINT'
+    );
 
     server.close();
+
+    await pool.end();
+
+    process.exit(0);
   }
 );
 
 process.once(
   'SIGTERM',
-  () => {
+  async () => {
 
     console.log(
-      'Arrêt du bot (SIGTERM)...'
+      'Arrêt du bot...'
     );
 
-    bot.stop('SIGTERM');
+    bot.stop(
+      'SIGTERM'
+    );
 
     server.close();
+
+    await pool.end();
+
+    process.exit(0);
+  }
+);
+
+// ============================================================
+// 41. GLOBAL ERROR HANDLER
+// ============================================================
+
+bot.catch(
+  (error, ctx) => {
+
+    console.error(
+      `[Telegraf Error] user=${ctx.from?.id}`,
+      error
+    );
+
+    ctx.reply(
+      `⚠️ Une erreur inattendue est survenue.\n\n` +
+      `Veuillez utiliser /start pour recommencer.`,
+      {
+        ...MAIN_REPLY_KEYBOARD
+      }
+    ).catch(
+      () => {}
+    );
   }
 );
