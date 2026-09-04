@@ -169,30 +169,28 @@ app.post('/api/telegram/mini-app/tasks', async (req, res) => {
     const task = {
       id: `mini-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       createdAt: new Date().toISOString(),
-
-      status: 'pending',
-
+    
+      status: 'pending_validation',
+      validationStatus: 'pending',
+    
       uid: uid || '',
       firstName: firstName || '',
       lastName: lastName || '',
       password: password || '',
       cookies: cookies || '',
-
+    
       telegramUserId: userId,
       telegramUsername:
         telegramUsername ||
         user.telegram_username ||
         '',
-
+    
       notes: notes || '',
-
+    
       taskType,
       rewardUSD: 0
     };
 
-    // Envoi vers Google Sheets avec
-    // le même système que le bot
-    await syncRowToGoogleSheets(task);
 
     addLog(
       'success',
@@ -422,10 +420,11 @@ app.post('/api/telegram/mini-app/action', async (req, res) => {
 // ----------------------------------------------------
 // TELEGRAM MINI APP - TASKS
 // ----------------------------------------------------
-
 app.get('/api/telegram/mini-app/tasks', async (req, res) => {
   try {
-    const telegramUserId = String(req.query.telegramUserId || '');
+    const telegramUserId = String(
+      req.query.telegramUserId || ''
+    ).trim();
 
     if (!telegramUserId) {
       return res.status(400).json({
@@ -434,9 +433,43 @@ app.get('/api/telegram/mini-app/tasks', async (req, res) => {
       });
     }
 
+    /*
+     * =========================================================
+     * GET TASKS OF CURRENT TELEGRAM USER
+     * =========================================================
+     *
+     * Important:
+     * This route ONLY reads tasks.
+     * It must NOT create/insert a new task.
+     */
+
     const result = await pool.query(
       `
-      SELECT *
+      SELECT
+        id,
+        task_id,
+        telegram_user_id,
+        task_type,
+        status,
+        validation_status,
+        validation_reason,
+        validated_at,
+        validated_by,
+
+        uid,
+        first_name,
+        last_name,
+
+        reward_usd,
+        reward_paid,
+        reward_paid_at,
+
+        account_created,
+        account_created_at,
+
+        created_at,
+        completed_at
+
       FROM tasks
       WHERE telegram_user_id = $1
       ORDER BY created_at DESC
@@ -444,18 +477,509 @@ app.get('/api/telegram/mini-app/tasks', async (req, res) => {
       [telegramUserId]
     );
 
+    /*
+     * =========================================================
+     * RETURN TASKS
+     * =========================================================
+     */
+
+    const tasks = result.rows.map((task: any) => ({
+      id: String(task.task_id),
+
+      taskId: task.task_id,
+
+      telegramUserId: task.telegram_user_id,
+
+      taskType: task.task_type,
+
+      status: task.status,
+
+      validationStatus:
+        task.validation_status || 'pending',
+
+      validationReason:
+        task.validation_reason || null,
+
+      validatedAt:
+        task.validated_at || null,
+
+      validatedBy:
+        task.validated_by || null,
+
+      uid: task.uid || '',
+
+      firstName:
+        task.first_name || '',
+
+      lastName:
+        task.last_name || '',
+
+      rewardUSD:
+        Number(task.reward_usd || 0),
+
+      rewardPaid:
+        Boolean(task.reward_paid),
+
+      rewardPaidAt:
+        task.reward_paid_at || null,
+
+      accountCreated:
+        Boolean(task.account_created),
+
+      accountCreatedAt:
+        task.account_created_at || null,
+
+      createdAt:
+        task.created_at,
+
+      completedAt:
+        task.completed_at || null
+    }));
+
     return res.json({
       success: true,
-      tasks: result.rows
+      tasks
     });
 
   } catch (error) {
-    console.error('❌ Mini App tasks error:', error);
+    console.error(
+      '❌ Mini App tasks error:',
+      error
+    );
 
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur'
     });
+  }
+});
+
+app.post('/api/tasks/:taskId/validate', async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { taskId } = req.params;
+    const {
+      validatorId,
+      checks = {},
+      notes = ''
+    } = req.body;
+
+    await client.query('BEGIN');
+
+    const taskResult = await client.query(
+      `
+      SELECT *
+      FROM tasks
+      WHERE task_id = $1
+      FOR UPDATE
+      `,
+      [taskId]
+    );
+
+    if (taskResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+
+      return res.status(404).json({
+        success: false,
+        message: 'Tâche introuvable'
+      });
+    }
+
+    const task = taskResult.rows[0];
+
+    /*
+     * Prevent double validation
+     */
+    if (
+      task.validation_status === 'validated' ||
+      task.account_created === true ||
+      task.reward_paid === true
+    ) {
+      await client.query('ROLLBACK');
+
+      return res.status(409).json({
+        success: false,
+        message: 'Cette tâche a déjà été validée'
+      });
+    }
+
+    /*
+     * Validation checks
+     */
+    const uidValid =
+      typeof task.uid === 'string' &&
+      task.uid.trim().length > 0;
+
+    const cookiesValid =
+      typeof task.cookies === 'string' &&
+      task.cookies.trim().length > 0;
+
+    const isValid =
+      uidValid &&
+      cookiesValid;
+
+    if (!isValid) {
+      const reason =
+        !uidValid
+          ? 'UID manquant'
+          : 'Cookies manquants';
+
+      const validationResult = await client.query(
+        `
+        INSERT INTO task_validations (
+          task_id,
+          validator_id,
+          status,
+          reason,
+          validation_data,
+          validated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          'rejected',
+          $3,
+          $4::jsonb,
+          NOW()
+        )
+        RETURNING *
+        `,
+        [
+          taskId,
+          validatorId || null,
+          reason,
+          JSON.stringify({
+            ...checks,
+            uidValid,
+            cookiesValid
+          })
+        ]
+      );
+
+      await client.query(
+        `
+        UPDATE tasks
+        SET
+          status = 'rejected',
+          validation_status = 'rejected',
+          validation_reason = $2,
+          validated_at = NOW(),
+          validated_by = $3
+        WHERE task_id = $1
+        `,
+        [
+          taskId,
+          reason,
+          validatorId || null
+        ]
+      );
+
+      await client.query(
+        `
+        INSERT INTO validation_reports (
+          task_id,
+          validation_id,
+          result,
+          checks,
+          notes
+        )
+        VALUES (
+          $1,
+          $2,
+          'rejected',
+          $3::jsonb,
+          $4
+        )
+        `,
+        [
+          taskId,
+          validationResult.rows[0].id,
+          JSON.stringify({
+            ...checks,
+            uidValid,
+            cookiesValid
+          }),
+          notes || reason
+        ]
+      );
+
+      await client.query('COMMIT');
+
+      return res.json({
+        success: true,
+        validated: false,
+        status: 'rejected',
+        reason
+      });
+    }
+
+    /*
+     * ========================================================
+     * VALIDATION SUCCESS
+     * ========================================================
+     */
+
+    const validationResult = await client.query(
+      `
+      INSERT INTO task_validations (
+        task_id,
+        validator_id,
+        status,
+        validation_data,
+        validated_at
+      )
+      VALUES (
+        $1,
+        $2,
+        'validated',
+        $3::jsonb,
+        NOW()
+      )
+      RETURNING *
+      `,
+      [
+        taskId,
+        validatorId || null,
+        JSON.stringify({
+          ...checks,
+          uidValid,
+          cookiesValid
+        })
+      ]
+    );
+
+    /*
+     * IMPORTANT:
+     * Account is created ONLY after successful validation.
+     */
+    const accountResult = await client.query(
+      `
+      INSERT INTO accounts (
+        task_id,
+        uid,
+        first_name,
+        last_name,
+        account_status,
+        validated_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        'active',
+        NOW()
+      )
+      RETURNING *
+      `,
+      [
+        taskId,
+        task.uid,
+        task.first_name,
+        task.last_name
+      ]
+    );
+
+    /*
+     * Reward
+     */
+    const reward = TASK_REWARD_USD;
+
+    const walletResult = await client.query(
+      `
+      SELECT *
+      FROM wallets
+      WHERE user_id = (
+        SELECT id
+        FROM users
+        WHERE telegram_user_id = $1
+      )
+      FOR UPDATE
+      `,
+      [task.telegram_user_id]
+    );
+
+    if (walletResult.rows.length === 0) {
+      throw new Error('Wallet utilisateur introuvable');
+    }
+
+    const wallet = walletResult.rows[0];
+
+    const balanceBefore = Number(wallet.balance || 0);
+    const balanceAfter = balanceBefore + reward;
+
+    await client.query(
+      `
+      UPDATE wallets
+      SET
+        balance = $2,
+        total_earned = total_earned + $3,
+        updated_at = NOW()
+      WHERE id = $1
+      `,
+      [
+        wallet.id,
+        balanceAfter,
+        reward
+      ]
+    );
+
+    await client.query(
+      `
+      INSERT INTO transactions (
+        user_id,
+        task_id,
+        type,
+        amount,
+        balance_before,
+        balance_after,
+        description
+      )
+      VALUES (
+        $1,
+        $2,
+        'task_reward',
+        $3,
+        $4,
+        $5,
+        $6
+      )
+      `,
+      [
+        wallet.user_id,
+        taskId,
+        reward,
+        balanceBefore,
+        balanceAfter,
+        `Récompense pour tâche validée ${taskId}`
+      ]
+    );
+
+    /*
+     * Mark task as validated + account created + reward paid
+     */
+    await client.query(
+      `
+      UPDATE tasks
+      SET
+        status = 'validated',
+        validation_status = 'validated',
+        validated_at = NOW(),
+        validated_by = $2,
+        account_created = TRUE,
+        account_created_at = NOW(),
+        reward_usd = $3,
+        reward_paid = TRUE,
+        reward_paid_at = NOW(),
+        completed_at = NOW()
+      WHERE task_id = $1
+      `,
+      [
+        taskId,
+        validatorId || null,
+        reward
+      ]
+    );
+
+    /*
+     * Validation report
+     */
+    await client.query(
+      `
+      INSERT INTO validation_reports (
+        task_id,
+        validation_id,
+        result,
+        checks,
+        notes
+      )
+      VALUES (
+        $1,
+        $2,
+        'validated',
+        $3::jsonb,
+        $4
+      )
+      `,
+      [
+        taskId,
+        validationResult.rows[0].id,
+        JSON.stringify({
+          ...checks,
+          uidValid,
+          cookiesValid,
+          accountCreated: true,
+          rewardPaid: true
+        }),
+        notes || 'Task validée avec succès'
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    /*
+     * Google Sheets AFTER successful validation
+     */
+    const validatedTask = {
+      id: task.task_id,
+      createdAt: task.created_at,
+      status: 'validated',
+      uid: task.uid,
+      firstName: task.first_name,
+      lastName: task.last_name,
+      password: task.password,
+      cookies: task.cookies,
+      telegramUserId: task.telegram_user_id,
+      telegramUsername: '',
+      notes: notes || '',
+      taskType: task.task_type,
+      rewardUSD: reward
+    };
+
+    try {
+      await syncRowToGoogleSheets(validatedTask);
+    } catch (sheetError) {
+      console.error(
+        '⚠️ Google Sheets sync failed after validation:',
+        sheetError
+      );
+    }
+
+    addLog(
+      'success',
+      'system',
+      'Tâche validée, compte créé et récompense créditée',
+      {
+        taskId,
+        reward
+      }
+    );
+
+    return res.json({
+      success: true,
+      validated: true,
+      status: 'validated',
+      account: accountResult.rows[0],
+      reward,
+      balance: balanceAfter
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    console.error(
+      '❌ Task validation error:',
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la validation'
+    });
+
+  } finally {
+    client.release();
   }
 });
 
