@@ -12,7 +12,9 @@ import {
   getUserStats,
   getAllWallets,
   getUserWithdrawalInfo,
-  updateUserWithdrawalInfo
+  updateUserWithdrawalInfo,
+  getAllUserAccounts,
+  deleteUserWithdrawalInfo
 } from './src/services/userService';
 import {
   getAllTasks,
@@ -35,8 +37,16 @@ import {
   updateStaffMember,
   loginStaff,
   verifySession,
-  logoutStaff
+  logoutStaff,
+  deleteStaffMember
 } from './src/services/authService';
+import {
+  initBotMessages,
+  getBotMessages,
+  getBotMessagesForLang,
+  saveBotMessages,
+  resetBotMessages
+} from './src/services/botMessagesService';
 import { getAuditLogs, logAudit } from './src/services/auditService';
 import { syncTaskToGoogleSheets } from './src/services/sheetsService';
 import { checkFacebookUid } from './src/services/facebookCheckerService';
@@ -1043,10 +1053,13 @@ const TRANSLATIONS = {
 };
 
 function getT(lang?: string) {
-  if (lang && lang in TRANSLATIONS) {
-    return TRANSLATIONS[lang as keyof typeof TRANSLATIONS];
+  const base = (lang && lang in TRANSLATIONS) ? TRANSLATIONS[lang as keyof typeof TRANSLATIONS] : TRANSLATIONS.fr;
+  try {
+    const custom = getBotMessagesForLang(lang || 'fr');
+    return { ...base, ...custom };
+  } catch {
+    return base;
   }
-  return TRANSLATIONS.fr;
 }
 
 // ----------------------------------------------------
@@ -2682,6 +2695,91 @@ app.patch('/api/staff/:id', async (req, res) => {
   }
 });
 
+app.delete('/api/staff/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = await deleteStaffMember(id);
+    res.status(result.success ? 200 : 400).json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 5f-2. User Accounts & Wallets Management API (Admin View)
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await getAllUserAccounts();
+    res.json(users);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/users/:telegramUserId', async (req, res) => {
+  try {
+    const tgId = req.params.telegramUserId;
+    const { usdtAddress, binanceId, isBanned } = req.body;
+    
+    if (usdtAddress !== undefined || binanceId !== undefined) {
+      await updateUserWithdrawalInfo(tgId, {
+        usdtAddress: usdtAddress || undefined,
+        binanceId: binanceId || undefined
+      });
+    }
+
+    if (isBanned !== undefined) {
+      await pool.query(
+        `UPDATE users SET is_banned = $1, updated_at = NOW() WHERE telegram_user_id = $2`,
+        [Boolean(isBanned), tgId]
+      );
+    }
+
+    res.json({ success: true, message: 'Utilisateur mis à jour' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/users/:telegramUserId/wallet-info', async (req, res) => {
+  try {
+    const tgId = req.params.telegramUserId;
+    const result = await deleteUserWithdrawalInfo(tgId);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 5f-3. Bot Messages Configuration API (Admin)
+app.get('/api/bot/messages', async (req, res) => {
+  try {
+    const messages = await getBotMessages();
+    res.json(messages);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bot/messages', async (req, res) => {
+  try {
+    const { lang, messages } = req.body;
+    const payload = (lang && messages) ? { [lang]: messages } : req.body;
+    const result = await saveBotMessages(payload);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/bot/messages/reset', async (_req, res) => {
+  try {
+    const result = await resetBotMessages();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // 5g. Wallets & Transactions API
 app.get('/api/wallets', async (req, res) => {
   try {
@@ -3726,6 +3824,7 @@ async function startServer() {
 
     try {
       await initializeDatabase();
+      await initBotMessages();
     } catch (e: any) {
       console.log('ℹ️ Database schema initialized / verified');
     }

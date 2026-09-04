@@ -338,3 +338,71 @@ export async function saveUserWithdrawalInfo(
   return user;
 }
 
+/**
+ * Supprimer les coordonnées de retrait d'un utilisateur (USDT et Binance ID)
+ */
+export async function deleteUserWithdrawalInfo(
+  telegramUserId: string | number
+): Promise<{ success: boolean }> {
+  const tgId = String(telegramUserId);
+  await pool.query(
+    `UPDATE users SET usdt_address = NULL, binance_id = NULL, updated_at = NOW() WHERE telegram_user_id = $1`,
+    [tgId]
+  );
+  return { success: true };
+}
+
+/**
+ * Récupérer tous les comptes utilisateurs avec leurs statistiques et soldes pour l'Admin
+ */
+export async function getAllUserAccounts(): Promise<any[]> {
+  try {
+    const res = await pool.query(`
+      SELECT
+        u.id,
+        u.telegram_user_id,
+        u.telegram_username,
+        u.first_name,
+        u.last_name,
+        u.language,
+        u.usdt_address,
+        u.binance_id,
+        u.created_at,
+        u.updated_at,
+        COALESCE(w.balance, 0) as balance,
+        COALESCE(w.pending_withdrawal, 0) as pending_withdrawal,
+        COALESCE(w.total_earned, 0) as total_earned,
+        COALESCE(w.total_withdrawn, 0) as total_withdrawn,
+        (SELECT COUNT(*)::integer FROM tasks t WHERE t.telegram_user_id = u.telegram_user_id AND (t.status = 'compte créé' OR t.status = 'vérifié' OR t.validation_status = 'validated' OR t.account_status = 'verified')) as tasks_completed,
+        (SELECT COUNT(*)::integer FROM tasks t WHERE t.telegram_user_id = u.telegram_user_id AND (t.status = 'pending' OR t.status = 'en attente' OR t.validation_status = 'pending')) as tasks_pending,
+        (SELECT COUNT(*)::integer FROM tasks t WHERE t.telegram_user_id = u.telegram_user_id AND (t.status = 'compte suspendu' OR t.status = 'annulé' OR t.validation_status = 'rejected' OR t.account_status = 'suspended')) as tasks_rejected
+      FROM users u
+      LEFT JOIN wallets w ON w.user_id = u.id
+      ORDER BY u.id DESC
+    `);
+
+    return res.rows.map((row: any) => ({
+      id: row.id,
+      telegramUserId: row.telegram_user_id,
+      telegramUsername: row.telegram_username || null,
+      firstName: row.first_name || null,
+      lastName: row.last_name || null,
+      language: row.language || 'fr',
+      usdtAddress: row.usdt_address || null,
+      binanceId: row.binance_id || null,
+      balance: Number(row.balance),
+      pendingWithdrawal: Number(row.pending_withdrawal),
+      totalEarned: Number(row.total_earned),
+      totalWithdrawn: Number(row.total_withdrawn),
+      tasksCompleted: Number(row.tasks_completed || 0),
+      tasksPending: Number(row.tasks_pending || 0),
+      tasksRejected: Number(row.tasks_rejected || 0),
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+      updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString()
+    }));
+  } catch (err: any) {
+    console.error('❌ Failed to fetch user accounts:', err.message);
+    return [];
+  }
+}
+

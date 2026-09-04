@@ -736,4 +736,232 @@ export async function fetchAuditLogs(limit: number = 50): Promise<any[]> {
   return res || [];
 }
 
+// ----------------------------------------------------
+// AUTH & STAFF API HELPERS
+// ----------------------------------------------------
+
+export const AUTH_TOKEN_KEY = 'taskify_auth_token';
+
+export function getAuthToken(): string | null {
+  return localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+export function setAuthToken(token: string) {
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+export function removeAuthToken() {
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+export async function loginStaffApi(username: string, pass: string): Promise<{ success: boolean; token?: string; staff?: any; message?: string }> {
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password: pass })
+    });
+    const data = await res.json();
+    if (res.ok && data.success && data.token) {
+      setAuthToken(data.token);
+    }
+    return data;
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Erreur réseau lors de la connexion' };
+  }
+}
+
+export async function getCurrentStaffApi(): Promise<{ success: boolean; staff?: any; message?: string }> {
+  const token = getAuthToken();
+  if (!token) return { success: false, message: 'Non authentifié' };
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (!res.ok) {
+      removeAuthToken();
+      return { success: false, message: 'Session expirée' };
+    }
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
+export async function logoutStaffApi(): Promise<void> {
+  const token = getAuthToken();
+  if (token) {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+    } catch {}
+    removeAuthToken();
+  }
+}
+
+export async function fetchAllStaffApi(): Promise<any[]> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch('/api/staff', {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function createStaffApi(data: {
+  username: string;
+  password: string;
+  fullName: string;
+  role: string;
+  permissions?: string[];
+}): Promise<{ success: boolean; staff?: any; message?: string }> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch('/api/staff', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
+export async function updateStaffApi(id: number, updates: any): Promise<{ success: boolean; message?: string }> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch(`/api/staff/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(updates)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
+export async function deleteStaffApi(id: number): Promise<{ success: boolean; message?: string }> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch(`/api/staff/${id}`, {
+      method: 'DELETE',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
+// ----------------------------------------------------
+// USERS MANAGEMENT API HELPERS
+// ----------------------------------------------------
+
+export async function fetchUsersApi(): Promise<any[]> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch('/api/users', {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function updateUserApi(telegramUserId: string, updates: any): Promise<{ success: boolean; message?: string }> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch(`/api/users/${telegramUserId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(updates)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
+export async function deleteUserWalletInfoApi(telegramUserId: string): Promise<{ success: boolean; message?: string }> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch(`/api/users/${telegramUserId}/wallet-info`, {
+      method: 'DELETE',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
+// ----------------------------------------------------
+// BOT MESSAGES CONFIG API HELPERS
+// ----------------------------------------------------
+
+export async function fetchBotMessagesApi(): Promise<any> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch('/api/bot/messages', {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function saveBotMessagesApi(messages: any): Promise<{ success: boolean; messages?: any; message?: string }> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch('/api/bot/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(messages)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
+export async function resetBotMessagesApi(): Promise<{ success: boolean; messages?: any; message?: string }> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch('/api/bot/messages/reset', {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
 

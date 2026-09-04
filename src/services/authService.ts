@@ -411,6 +411,48 @@ export async function updateStaffMember(
 }
 
 /**
+ * Delete a staff member (Super Admin only, cannot delete self or last Super Admin)
+ */
+export async function deleteStaffMember(id: number, currentStaffId?: number): Promise<{ success: boolean; message?: string }> {
+  try {
+    if (currentStaffId && id === currentStaffId) {
+      return { success: false, message: 'Vous ne pouvez pas supprimer votre propre compte.' };
+    }
+
+    const res = await pool.query('SELECT role FROM staff WHERE id = $1', [id]);
+    const staffRow = res.rows[0] || mockStaff.find(s => s.id === id);
+
+    if (!staffRow) {
+      return { success: false, message: 'Membre du personnel introuvable.' };
+    }
+
+    if (staffRow.role === 'SUPER_ADMIN') {
+      const countRes = await pool.query("SELECT COUNT(*)::integer as count FROM staff WHERE role = 'SUPER_ADMIN'");
+      const superAdminCount = Number(countRes.rows[0]?.count || mockStaff.filter(s => s.role === 'SUPER_ADMIN').length);
+      if (superAdminCount <= 1) {
+        return { success: false, message: 'Impossible de supprimer le seul Super Administrateur restant.' };
+      }
+    }
+
+    // Delete in DB
+    try {
+      await pool.query('DELETE FROM sessions WHERE staff_id = $1', [id]);
+      await pool.query('DELETE FROM staff WHERE id = $1', [id]);
+    } catch {
+      // Mock fallback
+      const idx = mockStaff.findIndex(s => s.id === id);
+      if (idx !== -1) mockStaff.splice(idx, 1);
+    }
+
+    logAudit('delete_staff', 'admin', { staffId: id }).catch(() => {});
+    return { success: true };
+  } catch (err: any) {
+    console.error('❌ Error deleting staff member:', err.message);
+    return { success: false, message: err.message || 'Erreur lors de la suppression' };
+  }
+}
+
+/**
  * Permission check helper
  */
 export function hasPermission(staff: StaffMember, permission: Permission): boolean {

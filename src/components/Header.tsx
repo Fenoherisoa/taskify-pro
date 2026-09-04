@@ -12,15 +12,22 @@ import {
   Download,
   AlertTriangle,
   DollarSign,
-  Users
+  Users,
+  MessageSquareText,
+  Smartphone,
+  LogOut,
+  Shield,
+  UserCheck
 } from 'lucide-react';
-import { BotSettings, TaskRecord } from '../types';
+import { BotSettings, TaskRecord, StaffMember, Permission } from '../types';
 
 interface HeaderProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   settings: BotSettings;
   tasks: TaskRecord[];
+  currentStaff: StaffMember | null;
+  onLogout: () => void;
   onRefresh: () => void;
   onOpenCreate: () => void;
   onOpenExport: () => void;
@@ -33,6 +40,8 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   settings,
   tasks,
+  currentStaff,
+  onLogout,
   onRefresh,
   onOpenCreate,
   onOpenExport,
@@ -41,25 +50,40 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const suspendedCount = tasks.filter(t => t.status === 'compte suspendu').length;
 
+  const canAccess = (requiredPerm?: Permission, allowedRoles?: string[]): boolean => {
+    if (!currentStaff) return true;
+    if (currentStaff.role === 'SUPER_ADMIN') return true;
+    if (allowedRoles && allowedRoles.includes(currentStaff.role)) return true;
+    if (requiredPerm) {
+      return (currentStaff.permissions || []).includes(requiredPerm);
+    }
+    return true;
+  };
+
   const navItems = [
-    { id: 'tasks', label: 'Tâches & Comptes', icon: Activity, badge: tasks.length },
-    { id: 'withdrawals', label: 'Retraits & Finances', icon: DollarSign, highlight: true },
+    { id: 'tasks', label: 'Tâches & Comptes', icon: Activity, badge: tasks.length, perm: 'tasks' as Permission },
+    { id: 'withdrawals', label: 'Retraits & Finances', icon: DollarSign, highlight: true, perm: 'withdrawals' as Permission },
+    { id: 'users', label: 'Travailleurs & Wallets', icon: Users, perm: 'users' as Permission },
+    { id: 'messages', label: 'Messages du Bot', icon: MessageSquareText, perm: 'settings' as Permission },
+    { id: 'staff', label: 'Équipe & Rôles', icon: ShieldCheck, perm: 'staff' as Permission, allowedRoles: ['SUPER_ADMIN', 'ADMIN'] },
+    { id: 'analytics', label: 'Analytiques', icon: Shield, perm: 'reports' as Permission },
+    { id: 'settings', label: 'Paramètres Bot', icon: Settings, perm: 'settings' as Permission },
+    { id: 'google-sheets', label: 'Google Sheets API', icon: FileSpreadsheet, perm: 'google_sheets' as Permission },
     { id: 'simulator', label: 'Simulateur Bot', icon: Bot },
-    { id: 'analytics', label: 'Analytiques', icon: ShieldCheck },
-    { id: 'staff', label: 'Équipe & Rôles', icon: Users },
-    { id: 'settings', label: 'Paramètres Bot', icon: Settings },
-    { id: 'google-sheets', label: 'Google Sheets API', icon: FileSpreadsheet },
+    { id: 'mini-app', label: 'Aperçu Mini App', icon: Smartphone },
     { id: 'tutorial', label: 'Déploiement 0€', icon: BookOpen },
-    { id: 'logs', label: 'Logs en direct', icon: Terminal }
+    { id: 'logs', label: 'Logs en direct', icon: Terminal, perm: 'audit_logs' as Permission }
   ];
 
+  const visibleNavItems = navItems.filter(item => canAccess(item.perm, item.allowedRoles));
+
   return (
-    <header className="bg-slate-900/90 backdrop-blur-xl border-b border-slate-800/80 sticky top-0 z-40">
+    <header className="bg-slate-900/95 backdrop-blur-xl border-b border-slate-800/80 sticky top-0 z-40">
       {/* Top Banner */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 sm:h-20">
+        <div className="flex items-center justify-between h-16 sm:h-20 gap-4">
           {/* Logo & Brand */}
-          <div className="flex items-center gap-3.5">
+          <div className="flex items-center gap-3.5 shrink-0">
             <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-blue-700 flex items-center justify-center shadow-lg shadow-indigo-500/25 ring-1 ring-white/20 shrink-0">
               <Bot className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
             </div>
@@ -73,17 +97,41 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-slate-400 hidden sm:flex items-center gap-2">
-                <span>Hub Automatisé de Supervision Telegram</span>
+                <span>Hub de Supervision RBAC & Bot Telegram</span>
                 <span className="text-slate-600">•</span>
-                <span className="flex items-center gap-1 text-emerald-400 font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-indicator"></span> Live Polling
+                <span className="flex items-center gap-1 text-emerald-400 font-medium font-mono text-[11px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-indicator"></span> Live PostgreSQL
                 </span>
               </p>
             </div>
           </div>
 
-          {/* Quick Actions */}
+          {/* User Profile & Global Actions */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Logged Staff Badge */}
+            {currentStaff && (
+              <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800">
+                <div className="w-7 h-7 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>{currentStaff.fullName || currentStaff.username}</span>
+                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold uppercase ${
+                      currentStaff.role === 'SUPER_ADMIN' 
+                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' 
+                        : currentStaff.role === 'ADMIN'
+                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    }`}>
+                      {currentStaff.role}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono">@{currentStaff.username}</span>
+                </div>
+              </div>
+            )}
+
             {suspendedCount > 0 && (
               <button 
                 onClick={() => setActiveTab('tasks')}
@@ -112,11 +160,11 @@ export const Header: React.FC<HeaderProps> = ({
 
             <button
               onClick={onOpenExport}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700/80 transition-all shadow-sm"
+              className="hidden lg:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700/80 transition-all shadow-sm"
               title="Exporter les fichiers du bot autonome"
             >
               <Download className="h-3.5 w-3.5 text-indigo-400" />
-              <span className="hidden lg:inline">Code Autonome</span>
+              <span>Export Code</span>
             </button>
 
             <button
@@ -134,6 +182,17 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <RefreshCw className="h-4 w-4" />
             </button>
+
+            {currentStaff && (
+              <button
+                onClick={onLogout}
+                className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 transition-all shadow-sm flex items-center gap-1"
+                title="Déconnexion sécurisée"
+              >
+                <LogOut className="h-4 w-4" />
+                <span className="hidden xl:inline text-xs font-semibold">Déconnexion</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -142,7 +201,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="bg-slate-950/70 border-t border-slate-800/70 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex space-x-1 sm:space-x-2 overflow-x-auto py-2.5 scrollbar-none">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (
@@ -173,4 +232,3 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
-

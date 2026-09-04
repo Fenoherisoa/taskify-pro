@@ -198,3 +198,97 @@ export async function sendTelegramVerificationMessage(
     return false;
   }
 }
+
+/**
+ * Sends a multilingual withdrawal lifecycle notification to the user via Telegram and in-app
+ */
+export async function sendTelegramWithdrawalNotification(params: {
+  userId: number;
+  telegramUserId?: string;
+  withdrawalId: number;
+  amount: number;
+  method: string;
+  destination: string;
+  action: string;
+  notes?: string;
+  botToken?: string;
+}): Promise<boolean> {
+  try {
+    let tgId = params.telegramUserId;
+    let lang = 'fr';
+
+    if (!tgId || !lang) {
+      const userRes = await pool.query(`SELECT telegram_user_id, language FROM users WHERE id = $1`, [params.userId]);
+      if (userRes.rows.length > 0) {
+        tgId = tgId || userRes.rows[0].telegram_user_id;
+        lang = userRes.rows[0].language || 'fr';
+      }
+    }
+
+    const amountStr = params.amount.toFixed(2);
+    let title = '';
+    let message = '';
+
+    if (params.action === 'approved') {
+      if (lang === 'en') {
+        title = '✅ Withdrawal approved';
+        message = `✅ *Withdrawal approved*\n\nYour withdrawal request #${params.withdrawalId} of $${amountStr} USD via ${params.method} (${params.destination}) has been approved by admin. Payment is being scheduled.`;
+      } else if (lang === 'mg') {
+        title = '✅ Fangatahana nankatoavina';
+        message = `✅ *Fangatahana nankatoavina*\n\nNekena ny fangatahanao fisintahana vola #${params.withdrawalId} mitentina $${amountStr} USD (${params.method} mankany ${params.destination}). Eo am-panomanana ny fandoavana.`;
+      } else {
+        title = '✅ Retrait approuvé';
+        message = `✅ *Retrait approuvé*\n\nVotre demande de retrait #${params.withdrawalId} de $${amountStr} USD (${params.method} vers ${params.destination}) a été approuvée. Le paiement est en cours de préparation.`;
+      }
+    } else if (params.action === 'paid') {
+      if (lang === 'en') {
+        title = '🎉 Withdrawal paid successfully';
+        message = `🎉 *Withdrawal paid!*\n\nYour withdrawal #${params.withdrawalId} of $${amountStr} USD has been sent to your ${params.method} account (${params.destination}).\n\nThank you for your valuable work!`;
+      } else if (lang === 'mg') {
+        title = '🎉 Voaloa soa aman-tsara ny vola';
+        message = `🎉 *Voaloa soa aman-tsara ny fisintahana vola!*\n\nLasa soa aman-tsara ny volanao #${params.withdrawalId} mitentina $${amountStr} USD mankany amin'ny ${params.method} (${params.destination}).\n\nMisaotra betsaka tamin'ny ezaka nataonao !`;
+      } else {
+        title = '🎉 Retrait payé avec succès !';
+        message = `🎉 *Retrait payé avec succès !*\n\nVotre retrait #${params.withdrawalId} de $${amountStr} USD a été envoyé vers votre compte ${params.method} (${params.destination}).\n\nMerci pour votre travail !`;
+      }
+    } else if (params.action === 'rejected' || params.action === 'cancelled') {
+      const reason = params.notes || (lang === 'en' ? 'Administrative check' : lang === 'mg' ? 'Fanaraha-maso' : 'Vérification administrative');
+      if (lang === 'en') {
+        title = '❌ Withdrawal rejected';
+        message = `❌ *Withdrawal rejected*\n\nYour withdrawal #${params.withdrawalId} of $${amountStr} USD was rejected.\n*Reason*: ${reason}\n\n💰 *Refund*: $${amountStr} USD has been refunded back to your available balance.`;
+      } else if (lang === 'mg') {
+        title = '❌ Nolavina ny fisintahana vola';
+        message = `❌ *Nolavina ny fisintahana vola*\n\nNolavina ny fangatahanao #${params.withdrawalId} mitentina $${amountStr} USD.\n*Antony*: ${reason}\n\n💰 *Famerenam-bola*: Naverina feno ao amin'ny solde-nao ny $${amountStr} USD.`;
+      } else {
+        title = '❌ Retrait rejeté';
+        message = `❌ *Retrait rejeté*\n\nVotre retrait #${params.withdrawalId} de $${amountStr} USD a été rejeté.\n*Motif*: ${reason}\n\n💰 *Remboursement*: Les $${amountStr} USD ont été intégralement réintégrés à votre solde disponible.`;
+      }
+    }
+
+    if (title && message) {
+      await createNotification(params.userId, title, message.replace(/\*/g, ''), params.action === 'paid' ? 'reward' : params.action === 'approved' ? 'info' : 'warning');
+    }
+
+    const token = params.botToken || process.env.TELEGRAM_BOT_TOKEN;
+    if (token && tgId) {
+      try {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: tgId,
+            text: message,
+            parse_mode: 'Markdown'
+          })
+        });
+      } catch (tgErr: any) {
+        console.warn('⚠️ Could not send Telegram withdrawal update:', tgErr.message);
+      }
+    }
+
+    return true;
+  } catch (err: any) {
+    console.error('❌ Failed in sendTelegramWithdrawalNotification:', err.message);
+    return false;
+  }
+}

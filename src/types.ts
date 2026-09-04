@@ -167,6 +167,32 @@ export interface BotLog {
   data?: any;
 }
 
+export interface UserAccountRecord {
+  id: number;
+  telegramUserId: string;
+  telegramUsername: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  language: string;
+  usdtAddress: string | null;
+  binanceId: string | null;
+  balance: number;
+  pendingWithdrawal: number;
+  totalEarned: number;
+  totalWithdrawn: number;
+  tasksCompleted: number;
+  tasksPending: number;
+  tasksRejected: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BotMessagesConfig {
+  fr: Record<string, string>;
+  en: Record<string, string>;
+  mg: Record<string, string>;
+}
+
 export interface TelegramSimulatedMessage {
   id: string;
   sender: 'bot' | 'user';

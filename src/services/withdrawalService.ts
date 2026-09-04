@@ -1,7 +1,7 @@
 import { pool } from './database';
 import { WithdrawalRecord, WithdrawalStatus, TransactionRecord } from '../types';
 import { logAudit } from './auditService';
-import { createNotification } from './notificationService';
+import { createNotification, sendTelegramWithdrawalNotification } from './notificationService';
 
 export const MIN_WITHDRAWAL_USD = 1.00; // Accessible threshold for tests & production
 
@@ -578,6 +578,17 @@ export async function processWithdrawal(
     }
 
     await client.query('COMMIT');
+
+    // Notify user via Telegram in their chosen language
+    sendTelegramWithdrawalNotification({
+      userId,
+      withdrawalId,
+      amount,
+      method: withdrawal.method,
+      destination: withdrawal.destination,
+      action,
+      notes
+    }).catch(() => {});
 
     logAudit(`withdrawal_${action}`, adminId, {
       withdrawalId,

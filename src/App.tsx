@@ -13,8 +13,11 @@ import { LiveLogsView } from './components/LiveLogsView';
 import { ExportModal } from './components/ExportModal';
 import { WithdrawalsView } from './components/WithdrawalsView';
 import { StaffView } from './components/StaffView';
+import { UserAccountsView } from './components/UserAccountsView';
+import { BotMessagesView } from './components/BotMessagesView';
+import { LoginPage } from './components/LoginPage';
 import TelegramMiniApp from './components/TelegramMiniApp';
-import { TaskRecord, BotSettings, BotLog, TaskStatus } from './types';
+import { TaskRecord, BotSettings, BotLog, TaskStatus, StaffMember } from './types';
 import { 
   fetchTasks, 
   fetchSettings, 
@@ -27,10 +30,18 @@ import {
   sendToGoogleSheetsWebhook,
   validateTaskApi,
   rejectTaskApi,
-  runBotCheckApi
+  runBotCheckApi,
+  getCurrentStaffApi,
+  logoutStaffApi
 } from './services/apiService';
+import { Bot, Loader2, ShieldAlert } from 'lucide-react';
 
 export default function App() {
+  // Authentication State
+  const [currentStaff, setCurrentStaff] = useState<StaffMember | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+
+  // Navigation & Data State
   const [activeTab, setActiveTab] = useState<string>('tasks');
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [settings, setSettings] = useState<BotSettings>({
@@ -61,8 +72,25 @@ export default function App() {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Fetch tasks & settings
+  // Check auth session on startup
+  const checkAuth = useCallback(async () => {
+    try {
+      const staff = await getCurrentStaffApi();
+      setCurrentStaff(staff);
+    } catch {
+      setCurrentStaff(null);
+    } finally {
+      setIsAuthChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  // Fetch tasks, settings, logs
   const loadData = useCallback(async () => {
+    if (!currentStaff) return;
     try {
       const [tasksData, settingsData, logsData] = await Promise.all([
         fetchTasks(),
@@ -75,13 +103,20 @@ export default function App() {
     } catch (err) {
       console.warn('Silent data refresh:', err);
     }
-  }, []);
+  }, [currentStaff]);
 
   useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 10000); // 10s polling
-    return () => clearInterval(interval);
-  }, [loadData]);
+    if (currentStaff) {
+      loadData();
+      const interval = setInterval(loadData, 10000); // 10s polling
+      return () => clearInterval(interval);
+    }
+  }, [currentStaff, loadData]);
+
+  const handleLogout = async () => {
+    await logoutStaffApi();
+    setCurrentStaff(null);
+  };
 
   const handleUpdateStatus = async (taskId: string, newStatus: TaskStatus) => {
     const updated = await updateTaskStatus(taskId, newStatus);
@@ -107,7 +142,7 @@ export default function App() {
 
   const handleValidateTask = async (taskId: string) => {
     try {
-      const res = await validateTaskApi(taskId, 'admin_dashboard', 'Validation manuelle');
+      const res = await validateTaskApi(taskId, currentStaff?.username || 'admin', 'Validation manuelle');
       if (res.success) {
         alert('✅ Tâche validée avec succès ! $0.040 USD crédités sur le portefeuille de l\'utilisateur.');
         await loadData();
@@ -124,7 +159,7 @@ export default function App() {
 
   const handleRejectTask = async (taskId: string, reason?: string) => {
     try {
-      const res = await rejectTaskApi(taskId, 'admin_dashboard', reason || 'Non conforme');
+      const res = await rejectTaskApi(taskId, currentStaff?.username || 'admin', reason || 'Non conforme');
       if (res.success) {
         alert('Tâche rejetée.');
         await loadData();
@@ -212,7 +247,9 @@ export default function App() {
     }
   };
 
+  // Telegram Mini App Standalone Query Detection
   const isTelegramMiniApp =
+    typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('telegramMiniApp') === '1';
 
   if (isTelegramMiniApp) {
@@ -230,63 +267,75 @@ export default function App() {
           };
 
           const telegramAction = actionMap[action];
+          if (!telegramAction) return;
 
-          if (!telegramAction) {
-            console.warn('Action Telegram inconnue:', action);
-            return;
-          }
-
-          // Alefa amin'ny bot backend ilay action
           fetch('/api/telegram/mini-app/action', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               action: telegramAction,
               telegramUserId:
-                window.Telegram?.WebApp?.initDataUnsafe?.user?.id
-                  ? String(
-                      window.Telegram.WebApp.initDataUnsafe.user.id
-                    )
+                (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id
+                  ? String((window as any).Telegram.WebApp.initDataUnsafe.user.id)
                   : null
             })
           })
-            .then(async (response) => {
-              if (!response.ok) {
-                throw new Error(
-                  `Mini App action failed: ${response.status}`
-                );
-              }
-
-              return response.json();
+            .then(res => res.json())
+            .then(result => {
+              if (result.redirect) window.location.href = result.redirect;
             })
-            .then((result) => {
-              console.log('Mini App action:', result);
-
-              if (result.redirect) {
-                window.location.href = result.redirect;
-              }
-            })
-            .catch((error) => {
-              console.error(
-                '❌ Erreur Mini App action:',
-                error
-              );
-            });
+            .catch(err => console.error('Mini App error:', err));
         }}
       />
     );
   }
 
+  // 1. Loading State while checking existing session
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-300">
+        <div className="w-16 h-16 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shadow-xl shadow-indigo-600/20 mb-4 animate-pulse">
+          <Bot className="w-8 h-8 text-indigo-400" />
+        </div>
+        <div className="flex items-center gap-2 font-mono text-sm text-slate-400">
+          <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+          <span>Vérification de la session sécurisée...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Unauthenticated -> Show Professional Login Page First
+  if (!currentStaff) {
+    return (
+      <LoginPage
+        onLoginSuccess={(staff) => {
+          setCurrentStaff(staff);
+          loadData();
+        }}
+      />
+    );
+  }
+
+  // Helper to check permission on active tab
+  const canAccessTab = (tabId: string): boolean => {
+    if (currentStaff.role === 'SUPER_ADMIN') return true;
+    if (tabId === 'staff' && currentStaff.role === 'MANAGER') return false;
+    if (tabId === 'settings' && currentStaff.role === 'MANAGER') return false;
+    if (tabId === 'google-sheets' && currentStaff.role === 'MANAGER') return false;
+    return true;
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-blue-600 selection:text-white font-sans antialiased">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-600 selection:text-white font-sans antialiased">
       {/* Top Header & Navigation */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         settings={settings}
         tasks={tasks}
+        currentStaff={currentStaff}
+        onLogout={handleLogout}
         onRefresh={loadData}
         onOpenCreate={() => setIsCreateOpen(true)}
         onOpenExport={() => setIsExportOpen(true)}
@@ -296,102 +345,152 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Tab 1: Tasks & Accounts List */}
-        {activeTab === 'tasks' && (
-          <div className="space-y-6 animate-in fade-in duration-200">
-            <StatsCards
-              tasks={tasks}
-              settings={settings}
-              onFilterStatus={setSelectedFilter}
-              selectedFilter={selectedFilter}
-            />
-
-            <TasksTable
-              tasks={tasks}
-              onSelectTask={setSelectedTask}
-              onUpdateStatus={handleUpdateStatus}
-              onDeleteTask={handleDeleteTask}
-              selectedFilter={selectedFilter}
-              onFilterChange={setSelectedFilter}
-              onValidateTask={handleValidateTask}
-              onRejectTask={handleRejectTask}
-              onBotCheckTask={handleBotCheckTask}
-            />
+        {/* Permission Guard */}
+        {!canAccessTab(activeTab) ? (
+          <div className="p-8 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-4 my-8">
+            <div className="w-12 h-12 mx-auto rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center">
+              <ShieldAlert className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-white">Accès Restreint</h3>
+            <p className="text-xs text-slate-400 max-w-md mx-auto">
+              Votre rôle ({currentStaff.role}) ne dispose pas des privilèges nécessaires pour accéder à cette interface.
+            </p>
+            <button
+              onClick={() => setActiveTab('tasks')}
+              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all"
+            >
+              Retour aux Tâches
+            </button>
           </div>
-        )}
+        ) : (
+          <>
+            {/* Tab 1: Tasks & Accounts List */}
+            {activeTab === 'tasks' && (
+              <div className="space-y-6 animate-in fade-in duration-200">
+                <StatsCards
+                  tasks={tasks}
+                  settings={settings}
+                  onFilterStatus={setSelectedFilter}
+                  selectedFilter={selectedFilter}
+                />
 
-        {/* Tab 2: Withdrawals & Financial Management */}
-        {activeTab === 'withdrawals' && (
-          <div className="animate-in fade-in duration-200">
-            <WithdrawalsView onRefreshStats={loadData} />
-          </div>
-        )}
+                <TasksTable
+                  tasks={tasks}
+                  onSelectTask={setSelectedTask}
+                  onUpdateStatus={handleUpdateStatus}
+                  onDeleteTask={handleDeleteTask}
+                  selectedFilter={selectedFilter}
+                  onFilterChange={setSelectedFilter}
+                  onValidateTask={handleValidateTask}
+                  onRejectTask={handleRejectTask}
+                  onBotCheckTask={handleBotCheckTask}
+                />
+              </div>
+            )}
 
-        {/* Tab 3: Interactive Telegram Bot Simulator */}
-        {activeTab === 'simulator' && (
-          <div className="animate-in fade-in duration-200" data-tab="simulator">
-            <BotSimulator
-              settings={settings}
-              onNewTaskCreated={(newTask) => {
-                setTasks(prev => [newTask, ...prev]);
-              }}
-              onRefreshTasks={loadData}
-            />
-          </div>
-        )}
+            {/* Tab 2: Withdrawals & Financial Management */}
+            {activeTab === 'withdrawals' && (
+              <div className="animate-in fade-in duration-200">
+                <WithdrawalsView onRefreshStats={loadData} />
+              </div>
+            )}
 
-        {/* Tab 4: Analytics & Visual Tracking */}
-        {activeTab === 'analytics' && (
-          <div className="animate-in fade-in duration-200">
-            <AnalyticsView tasks={tasks} />
-          </div>
-        )}
+            {/* Tab 3: User Accounts & Wallets */}
+            {activeTab === 'users' && (
+              <div className="animate-in fade-in duration-200">
+                <UserAccountsView />
+              </div>
+            )}
 
-        {/* Tab 5: Staff & RBAC Team Management */}
-        {activeTab === 'staff' && (
-          <div className="animate-in fade-in duration-200">
-            <StaffView />
-          </div>
-        )}
+            {/* Tab 4: Bot Messages Multilingual Configuration */}
+            {activeTab === 'messages' && (
+              <div className="animate-in fade-in duration-200">
+                <BotMessagesView />
+              </div>
+            )}
 
-        {/* Tab 6: Bot Settings */}
-        {activeTab === 'settings' && (
-          <div className="animate-in fade-in duration-200">
-            <BotSettingsView
-              settings={settings}
-              onSaveSettings={handleSaveSettings}
-              onTestGoogleSheets={handleTestGoogleSheets}
-            />
-          </div>
-        )}
+            {/* Tab 5: Staff & RBAC Team Management */}
+            {activeTab === 'staff' && (
+              <div className="animate-in fade-in duration-200">
+                <StaffView currentStaff={currentStaff} />
+              </div>
+            )}
 
-        {/* Tab 7: Google Apps Script Backend Code */}
-        {activeTab === 'google-sheets' && (
-          <div className="animate-in fade-in duration-200">
-            <GoogleAppsScriptView />
-          </div>
-        )}
+            {/* Tab 6: Interactive Telegram Bot Simulator */}
+            {activeTab === 'simulator' && (
+              <div className="animate-in fade-in duration-200" data-tab="simulator">
+                <BotSimulator
+                  settings={settings}
+                  onNewTaskCreated={(newTask) => {
+                    setTasks(prev => [newTask, ...prev]);
+                  }}
+                  onRefreshTasks={loadData}
+                />
+              </div>
+            )}
 
-        {/* Tab 8: Free 0€ Deployment Tutorial */}
-        {activeTab === 'tutorial' && (
-          <div className="animate-in fade-in duration-200">
-            <DeploymentTutorialView />
-          </div>
-        )}
+            {/* Tab 7: Telegram Mini App Preview */}
+            {activeTab === 'mini-app' && (
+              <div className="animate-in fade-in duration-200 max-w-md mx-auto py-4">
+                <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden">
+                  <div className="text-center pb-3 border-b border-slate-800 mb-3">
+                    <span className="text-xs font-bold text-white">Aperçu Telegram Mini App Mobile</span>
+                    <p className="text-[10px] text-slate-400">Rendu interactif tel qu'affiché dans Telegram WebApp</p>
+                  </div>
+                  <TelegramMiniApp />
+                </div>
+              </div>
+            )}
 
-        {/* Tab 9: Real-time Live Logs */}
-        {activeTab === 'logs' && (
-          <div className="animate-in fade-in duration-200">
-            <LiveLogsView logs={logs} onRefresh={loadData} />
-          </div>
+            {/* Tab 8: Analytics & Visual Tracking */}
+            {activeTab === 'analytics' && (
+              <div className="animate-in fade-in duration-200">
+                <AnalyticsView tasks={tasks} />
+              </div>
+            )}
+
+            {/* Tab 9: Bot Settings */}
+            {activeTab === 'settings' && (
+              <div className="animate-in fade-in duration-200">
+                <BotSettingsView
+                  settings={settings}
+                  onSaveSettings={handleSaveSettings}
+                  onTestGoogleSheets={handleTestGoogleSheets}
+                />
+              </div>
+            )}
+
+            {/* Tab 10: Google Apps Script Backend Code */}
+            {activeTab === 'google-sheets' && (
+              <div className="animate-in fade-in duration-200">
+                <GoogleAppsScriptView />
+              </div>
+            )}
+
+            {/* Tab 11: Free 0€ Deployment Tutorial */}
+            {activeTab === 'tutorial' && (
+              <div className="animate-in fade-in duration-200">
+                <DeploymentTutorialView />
+              </div>
+            )}
+
+            {/* Tab 12: Real-time Live Logs */}
+            {activeTab === 'logs' && (
+              <div className="animate-in fade-in duration-200">
+                <LiveLogsView logs={logs} onRefresh={loadData} />
+              </div>
+            )}
+          </>
         )}
       </main>
 
       {/* Footer */}
       <footer className="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>Task By RFC Office • Système d'Automatisation & Gestion de Comptes</span>
-          <span className="font-mono text-[11px] text-slate-400">100% Free Tier Hosted • Google Sheets API • Telegraf Bot</span>
+          <span>Taskify Pro • Hub de Supervision Telegram & Validation PostgreSQL</span>
+          <div className="flex items-center gap-3 font-mono text-[11px] text-slate-400">
+            <span>Connecté en tant que <strong className="text-slate-200">{currentStaff.username}</strong> ({currentStaff.role})</span>
+          </div>
         </div>
       </footer>
 
