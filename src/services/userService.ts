@@ -6,6 +6,7 @@ export interface PersistentUser {
   telegram_username: string | null;
   first_name: string | null;
   last_name: string | null;
+  language: string;
 }
 
 export interface Wallet {
@@ -16,6 +17,12 @@ export interface Wallet {
   total_withdrawn: number;
 }
 
+export interface UserStats {
+  completed: number;
+  pending: number;
+  rejected: number;
+}
+
 /**
  * Créer ou récupérer un utilisateur Telegram
  */
@@ -23,7 +30,8 @@ export async function getOrCreateUser(
   telegramUserId: string | number,
   telegramUsername?: string,
   firstName?: string,
-  lastName?: string
+  lastName?: string,
+  language?: string
 ): Promise<PersistentUser> {
   const telegramId = String(telegramUserId);
 
@@ -51,6 +59,7 @@ export async function getOrCreateUser(
           telegram_username = COALESCE($2, telegram_username),
           first_name = COALESCE($3, first_name),
           last_name = COALESCE($4, last_name),
+          language = COALESCE($5, language),
           updated_at = NOW()
         WHERE telegram_user_id = $1
         RETURNING *
@@ -59,7 +68,8 @@ export async function getOrCreateUser(
           telegramId,
           telegramUsername || null,
           firstName || null,
-          lastName || null
+          lastName || null,
+          language || null
         ]
       );
 
@@ -72,16 +82,18 @@ export async function getOrCreateUser(
           telegram_user_id,
           telegram_username,
           first_name,
-          last_name
+          last_name,
+          language
         )
-        VALUES ($1, $2, $3, $4)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING *
         `,
         [
           telegramId,
           telegramUsername || null,
           firstName || null,
-          lastName || null
+          lastName || null,
+          language || 'fr'
         ]
       );
 
@@ -112,6 +124,60 @@ export async function getOrCreateUser(
 }
 
 /**
+ * Mettre à jour la langue de l'utilisateur
+ */
+export async function setUserLanguage(
+  telegramUserId: string | number,
+  language: string
+): Promise<boolean> {
+  try {
+    await pool.query(
+      `
+      UPDATE users
+      SET language = $1, updated_at = NOW()
+      WHERE telegram_user_id = $2
+      `,
+      [language, String(telegramUserId)]
+    );
+    return true;
+  } catch (err: any) {
+    console.error('❌ Failed to update user language:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Récupérer les statistiques des tâches d'un utilisateur
+ */
+export async function getUserStats(
+  telegramUserId: string | number
+): Promise<UserStats> {
+  try {
+    const res = await pool.query(
+      `
+      SELECT
+        COUNT(*) FILTER (WHERE validation_status = 'validated' OR status = 'compte créé' OR status = 'vérifié')::INTEGER AS completed,
+        COUNT(*) FILTER (WHERE validation_status = 'pending' OR status = 'en attente' OR status = 'pending')::INTEGER AS pending,
+        COUNT(*) FILTER (WHERE validation_status = 'rejected' OR status = 'annulé')::INTEGER AS rejected
+      FROM tasks
+      WHERE telegram_user_id = $1
+      `,
+      [String(telegramUserId)]
+    );
+
+    const row = res.rows[0] || {};
+    return {
+      completed: Number(row.completed || 0),
+      pending: Number(row.pending || 0),
+      rejected: Number(row.rejected || 0)
+    };
+  } catch (err: any) {
+    console.error('❌ Failed to fetch user stats:', err.message);
+    return { completed: 0, pending: 0, rejected: 0 };
+  }
+}
+
+/**
  * Récupérer le wallet d'un utilisateur Telegram
  */
 export async function getUserWallet(
@@ -138,5 +204,24 @@ export async function getUserWallet(
     balance: Number(result.rows[0].balance),
     total_earned: Number(result.rows[0].total_earned),
     total_withdrawn: Number(result.rows[0].total_withdrawn)
+  };
+}
+
+/**
+ * Profil complet de l'utilisateur (user + wallet + stats)
+ */
+export async function getUserProfile(telegramUserId: string | number) {
+  const user = await getOrCreateUser(telegramUserId);
+  const wallet = await getUserWallet(telegramUserId);
+  const statistics = await getUserStats(telegramUserId);
+
+  return {
+    user,
+    wallet: wallet || {
+      balance: 0,
+      totalEarned: 0,
+      totalWithdrawn: 0
+    },
+    statistics
   };
 }

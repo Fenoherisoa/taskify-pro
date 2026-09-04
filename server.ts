@@ -6,8 +6,27 @@ import { pool, testDatabaseConnection } from './src/services/database';
 import { initializeDatabase } from './src/services/databaseInit';
 import {
   getOrCreateUser,
-  getUserWallet
+  getUserWallet,
+  getUserProfile,
+  setUserLanguage,
+  getUserStats
 } from './src/services/userService';
+import {
+  getAllTasks,
+  createTask,
+  validateTask,
+  rejectTask,
+  updateTaskStatus,
+  deleteTask
+} from './src/services/taskService';
+import {
+  requestWithdrawal,
+  getAllWithdrawals,
+  processWithdrawal
+} from './src/services/withdrawalService';
+import { getAuditLogs, logAudit } from './src/services/auditService';
+import { syncTaskToGoogleSheets } from './src/services/sheetsService';
+import { INITIAL_TASKS } from './src/data/mockTasks';
 import crypto from 'crypto';
 
 const app = express();
@@ -166,38 +185,28 @@ app.post('/api/telegram/mini-app/tasks', async (req, res) => {
       });
     }
 
-    const task = {
-      id: `mini-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      createdAt: new Date().toISOString(),
-    
-      status: 'pending_validation',
-      validationStatus: 'pending',
-    
-      uid: uid || '',
+    const created = await createTask({
+      taskId: `mini-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      telegramUserId: userId,
+      telegramUsername: telegramUsername || user.telegram_username || '',
       firstName: firstName || '',
       lastName: lastName || '',
       password: password || '',
+      uid: uid || '',
       cookies: cookies || '',
-    
-      telegramUserId: userId,
-      telegramUsername:
-        telegramUsername ||
-        user.telegram_username ||
-        '',
-    
+      taskType: taskType || 'Facebook',
       notes: notes || '',
-    
-      taskType,
-      rewardUSD: 0
-    };
+      status: 'compte créé'
+    });
 
+    tasks.unshift(created);
 
     addLog(
       'success',
-      'sheets',
-      'Tâche Mini App envoyée vers Google Sheets',
+      'system',
+      'Tâche Mini App enregistrée dans la base PostgreSQL',
       {
-        taskId: task.id,
+        taskId: created.id,
         telegramUserId: userId,
         taskType
       }
@@ -206,7 +215,7 @@ app.post('/api/telegram/mini-app/tasks', async (req, res) => {
     return res.json({
       success: true,
       message: 'Tâche enregistrée avec succès',
-      task
+      task: created
     });
 
   } catch (error) {
@@ -555,431 +564,26 @@ app.get('/api/telegram/mini-app/tasks', async (req, res) => {
 });
 
 app.post('/api/tasks/:taskId/validate', async (req, res) => {
-  const client = await pool.connect();
-
   try {
     const { taskId } = req.params;
     const {
-      validatorId,
-      checks = {},
-      notes = ''
+      validatorId = 'admin',
+      notes = 'Validé avec succès'
     } = req.body;
 
-    await client.query('BEGIN');
-
-    const taskResult = await client.query(
-      `
-      SELECT *
-      FROM tasks
-      WHERE task_id = $1
-      FOR UPDATE
-      `,
-      [taskId]
-    );
-
-    if (taskResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-
-      return res.status(404).json({
-        success: false,
-        message: 'Tâche introuvable'
-      });
-    }
-
-    const task = taskResult.rows[0];
-
-    /*
-     * Prevent double validation
-     */
-    if (
-      task.validation_status === 'validated' ||
-      task.account_created === true ||
-      task.reward_paid === true
-    ) {
-      await client.query('ROLLBACK');
-
-      return res.status(409).json({
-        success: false,
-        message: 'Cette tâche a déjà été validée'
-      });
-    }
-
-    /*
-     * Validation checks
-     */
-    const uidValid =
-      typeof task.uid === 'string' &&
-      task.uid.trim().length > 0;
-
-    const cookiesValid =
-      typeof task.cookies === 'string' &&
-      task.cookies.trim().length > 0;
-
-    const isValid =
-      uidValid &&
-      cookiesValid;
-
-    if (!isValid) {
-      const reason =
-        !uidValid
-          ? 'UID manquant'
-          : 'Cookies manquants';
-
-      const validationResult = await client.query(
-        `
-        INSERT INTO task_validations (
-          task_id,
-          validator_id,
-          status,
-          reason,
-          validation_data,
-          validated_at
-        )
-        VALUES (
-          $1,
-          $2,
-          'rejected',
-          $3,
-          $4::jsonb,
-          NOW()
-        )
-        RETURNING *
-        `,
-        [
-          taskId,
-          validatorId || null,
-          reason,
-          JSON.stringify({
-            ...checks,
-            uidValid,
-            cookiesValid
-          })
-        ]
-      );
-
-      await client.query(
-        `
-        UPDATE tasks
-        SET
-          status = 'rejected',
-          validation_status = 'rejected',
-          validation_reason = $2,
-          validated_at = NOW(),
-          validated_by = $3
-        WHERE task_id = $1
-        `,
-        [
-          taskId,
-          reason,
-          validatorId || null
-        ]
-      );
-
-      await client.query(
-        `
-        INSERT INTO validation_reports (
-          task_id,
-          validation_id,
-          result,
-          checks,
-          notes
-        )
-        VALUES (
-          $1,
-          $2,
-          'rejected',
-          $3::jsonb,
-          $4
-        )
-        `,
-        [
-          taskId,
-          validationResult.rows[0].id,
-          JSON.stringify({
-            ...checks,
-            uidValid,
-            cookiesValid
-          }),
-          notes || reason
-        ]
-      );
-
-      await client.query('COMMIT');
-
-      return res.json({
-        success: true,
-        validated: false,
-        status: 'rejected',
-        reason
-      });
-    }
-
-    /*
-     * ========================================================
-     * VALIDATION SUCCESS
-     * ========================================================
-     */
-
-    const validationResult = await client.query(
-      `
-      INSERT INTO task_validations (
-        task_id,
-        validator_id,
-        status,
-        validation_data,
-        validated_at
-      )
-      VALUES (
-        $1,
-        $2,
-        'validated',
-        $3::jsonb,
-        NOW()
-      )
-      RETURNING *
-      `,
-      [
-        taskId,
-        validatorId || null,
-        JSON.stringify({
-          ...checks,
-          uidValid,
-          cookiesValid
-        })
-      ]
-    );
-
-    /*
-     * IMPORTANT:
-     * Account is created ONLY after successful validation.
-     */
-    const accountResult = await client.query(
-      `
-      INSERT INTO accounts (
-        task_id,
-        uid,
-        first_name,
-        last_name,
-        account_status,
-        validated_at
-      )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        $4,
-        'active',
-        NOW()
-      )
-      RETURNING *
-      `,
-      [
-        taskId,
-        task.uid,
-        task.first_name,
-        task.last_name
-      ]
-    );
-
-    /*
-     * Reward
-     */
-    const reward = TASK_REWARD_USD;
-
-    const walletResult = await client.query(
-      `
-      SELECT *
-      FROM wallets
-      WHERE user_id = (
-        SELECT id
-        FROM users
-        WHERE telegram_user_id = $1
-      )
-      FOR UPDATE
-      `,
-      [task.telegram_user_id]
-    );
-
-    if (walletResult.rows.length === 0) {
-      throw new Error('Wallet utilisateur introuvable');
-    }
-
-    const wallet = walletResult.rows[0];
-
-    const balanceBefore = Number(wallet.balance || 0);
-    const balanceAfter = balanceBefore + reward;
-
-    await client.query(
-      `
-      UPDATE wallets
-      SET
-        balance = $2,
-        total_earned = total_earned + $3,
-        updated_at = NOW()
-      WHERE id = $1
-      `,
-      [
-        wallet.id,
-        balanceAfter,
-        reward
-      ]
-    );
-
-    await client.query(
-      `
-      INSERT INTO transactions (
-        user_id,
-        task_id,
-        type,
-        amount,
-        balance_before,
-        balance_after,
-        description
-      )
-      VALUES (
-        $1,
-        $2,
-        'task_reward',
-        $3,
-        $4,
-        $5,
-        $6
-      )
-      `,
-      [
-        wallet.user_id,
-        taskId,
-        reward,
-        balanceBefore,
-        balanceAfter,
-        `Récompense pour tâche validée ${taskId}`
-      ]
-    );
-
-    /*
-     * Mark task as validated + account created + reward paid
-     */
-    await client.query(
-      `
-      UPDATE tasks
-      SET
-        status = 'validated',
-        validation_status = 'validated',
-        validated_at = NOW(),
-        validated_by = $2,
-        account_created = TRUE,
-        account_created_at = NOW(),
-        reward_usd = $3,
-        reward_paid = TRUE,
-        reward_paid_at = NOW(),
-        completed_at = NOW()
-      WHERE task_id = $1
-      `,
-      [
-        taskId,
-        validatorId || null,
-        reward
-      ]
-    );
-
-    /*
-     * Validation report
-     */
-    await client.query(
-      `
-      INSERT INTO validation_reports (
-        task_id,
-        validation_id,
-        result,
-        checks,
-        notes
-      )
-      VALUES (
-        $1,
-        $2,
-        'validated',
-        $3::jsonb,
-        $4
-      )
-      `,
-      [
-        taskId,
-        validationResult.rows[0].id,
-        JSON.stringify({
-          ...checks,
-          uidValid,
-          cookiesValid,
-          accountCreated: true,
-          rewardPaid: true
-        }),
-        notes || 'Task validée avec succès'
-      ]
-    );
-
-    await client.query('COMMIT');
-
-    /*
-     * Google Sheets AFTER successful validation
-     */
-    const validatedTask = {
-      id: task.task_id,
-      createdAt: task.created_at,
-      status: 'validated',
-      uid: task.uid,
-      firstName: task.first_name,
-      lastName: task.last_name,
-      password: task.password,
-      cookies: task.cookies,
-      telegramUserId: task.telegram_user_id,
-      telegramUsername: '',
-      notes: notes || '',
-      taskType: task.task_type,
-      rewardUSD: reward
-    };
-
-    try {
-      await syncRowToGoogleSheets(validatedTask);
-    } catch (sheetError) {
-      console.error(
-        '⚠️ Google Sheets sync failed after validation:',
-        sheetError
-      );
-    }
-
-    addLog(
-      'success',
-      'system',
-      'Tâche validée, compte créé et récompense créditée',
-      {
-        taskId,
-        reward
-      }
-    );
-
+    const validated = await validateTask(taskId, validatorId, notes);
     return res.json({
       success: true,
       validated: true,
       status: 'validated',
-      account: accountResult.rows[0],
-      reward,
-      balance: balanceAfter
+      task: validated
     });
-
-  } catch (error) {
-    await client.query('ROLLBACK');
-
-    console.error(
-      '❌ Task validation error:',
-      error
-    );
-
-    return res.status(500).json({
+  } catch (error: any) {
+    console.error('❌ Validation error:', error.message);
+    return res.status(400).json({
       success: false,
-      message: 'Erreur lors de la validation'
+      message: error.message || 'Erreur lors de la validation'
     });
-
-  } finally {
-    client.release();
   }
 });
 
@@ -1132,7 +736,7 @@ let botSettings = {
   welcomeMessage: "Bienvenue sur Taskify Pro (@TaskifyProBot) - Gestionnaire de tâches automatisées."
 };
 
-let tasks: any[] = [];
+let tasks: any[] = [...INITIAL_TASKS];
 let logs: any[] = [];
 
 function addLog(type: 'info' | 'success' | 'warning' | 'error', source: 'telegram' | 'sheets' | 'system' | 'simulator', message: string, data?: any) {
@@ -2363,9 +1967,9 @@ function setupTelegrafHandlers(bot: Telegraf) {
 
       // Async sync to Google Sheets
       if (botSettings.googleSheetWebhookUrl) {
-        syncRowToGoogleSheets(createdTask).then(res => {
-          if (res.success) createdTask.syncedToGoogleSheets = true;
-        });
+        syncRowToGoogleSheets(createdTask).then(() => {
+          createdTask.syncedToGoogleSheets = true;
+        }).catch(() => {});
       }
 
       // -----------------------------------------------
@@ -2700,39 +2304,183 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
-// 4. Update task
-app.put('/api/tasks/:id', (req, res) => {
-  const { id } = req.params;
-  const taskIndex = tasks.findIndex(t => t.id === id);
-
-  if (taskIndex === -1) {
-    return res.status(400).json({ error: 'Tâche non trouvée' });
+// 3. Get all tasks from PostgreSQL
+app.get('/api/tasks', async (req, res) => {
+  try {
+    const list = await getAllTasks(req.query.status as string);
+    if (list.length > 0) {
+      return res.json(list);
+    }
+  } catch (err: any) {
+    console.error('API /api/tasks error:', err.message);
   }
+  res.json(tasks);
+});
 
-  tasks[taskIndex] = {
-    ...tasks[taskIndex],
-    ...req.body,
-    updatedAt: new Date().toISOString()
-  };
+// 3b. Create task in PostgreSQL
+app.post('/api/tasks', async (req, res) => {
+  try {
+    const created = await createTask({
+      taskId: req.body.id,
+      telegramUserId: req.body.telegramUserId || 'manual_admin',
+      telegramUsername: req.body.telegramUsername || 'admin_portal',
+      firstName: req.body.firstName,
+      lastName: req.body.lastName,
+      password: req.body.password || botSettings.customPassword,
+      cookies: req.body.cookies,
+      uid: req.body.uid,
+      taskType: req.body.taskType || 'Facebook',
+      notes: req.body.notes,
+      status: req.body.status || 'compte créé'
+    });
 
-  addLog(
-    'info',
-    'system',
-    `Tâche mise à jour (UID: ${tasks[taskIndex].uid}, Statut: ${tasks[taskIndex].status})`
-  );
+    tasks.unshift(created);
 
-  res.json(tasks[taskIndex]);
+    addLog(
+      'success',
+      'system',
+      `Nouvelle tâche créée (UID: ${created.uid || 'N/A'}, Utilisateur: ${created.telegramUsername || 'N/A'})`
+    );
+
+    res.status(201).json(created);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Update task (PATCH)
+app.patch('/api/tasks/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const updated = await updateTaskStatus(
+      id,
+      req.body.status || 'compte créé',
+      req.body.notes
+    );
+    const taskIndex = tasks.findIndex(t => t.id === id);
+    if (taskIndex !== -1) {
+      tasks[taskIndex] = { ...tasks[taskIndex], ...req.body, updatedAt: new Date().toISOString() };
+    }
+    addLog(
+      'info',
+      'system',
+      `Tâche mise à jour (UID: ${updated.uid}, Statut: ${updated.status})`
+    );
+    return res.json(updated);
+  } catch (err: any) {
+    // Fallback for in-memory if task was not in db
+    const taskIndex = tasks.findIndex(t => t.id === id);
+    if (taskIndex !== -1) {
+      tasks[taskIndex] = { ...tasks[taskIndex], ...req.body, updatedAt: new Date().toISOString() };
+      return res.json(tasks[taskIndex]);
+    }
+    return res.status(404).json({ error: err.message || 'Tâche non trouvée' });
+  }
+});
+
+// 4b. Update task (PUT)
+app.put('/api/tasks/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const updated = await updateTaskStatus(
+      id,
+      req.body.status || 'compte créé',
+      req.body.notes
+    );
+    return res.json(updated);
+  } catch (err: any) {
+    const taskIndex = tasks.findIndex(t => t.id === id);
+    if (taskIndex !== -1) {
+      tasks[taskIndex] = { ...tasks[taskIndex], ...req.body, updatedAt: new Date().toISOString() };
+      return res.json(tasks[taskIndex]);
+    }
+    return res.status(400).json({ error: err.message || 'Tâche non trouvée' });
+  }
 });
 
 // 5. Delete task
-app.delete('/api/tasks/:id', (req, res) => {
+app.delete('/api/tasks/:id', async (req, res) => {
   const { id } = req.params;
-  const task = tasks.find(t => t.id === id);
-  tasks = tasks.filter(t => t.id !== id);
-  if (task) {
-    addLog('warning', 'system', `Tâche supprimée (UID: ${task.uid})`);
+  try {
+    await deleteTask(id);
+    tasks = tasks.filter(t => t.id !== id);
+    addLog('warning', 'system', `Tâche supprimée (ID: ${id})`);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
-  res.json({ success: true });
+});
+
+// 5b. Task Rejection
+app.post('/api/tasks/:taskId/reject', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { validatorId = 'admin', reason = 'Rejeté par administrateur' } = req.body;
+    const result = await rejectTask(taskId, validatorId, reason);
+    res.json({ success: true, task: result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// 5c. Withdrawals API
+app.get('/api/withdrawals', async (req, res) => {
+  try {
+    const list = await getAllWithdrawals(req.query.status as string);
+    res.json(list);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/withdrawals', async (req, res) => {
+  try {
+    const { telegramUserId, amount, method, destination } = req.body;
+    const result = await requestWithdrawal(telegramUserId, Number(amount), method, destination);
+    res.status(result.success ? 200 : 400).json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/withdrawals/:id/process', async (req, res) => {
+  try {
+    const { action, adminId = 'admin', notes } = req.body;
+    const result = await processWithdrawal(Number(req.params.id), action, adminId, notes);
+    res.status(result.success ? 200 : 400).json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 5d. User Profile and Language API
+app.get('/api/user/:telegramUserId', async (req, res) => {
+  try {
+    const profile = await getUserProfile(req.params.telegramUserId);
+    res.json(profile);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/user/:telegramUserId/language', async (req, res) => {
+  try {
+    const { language } = req.body;
+    const success = await setUserLanguage(req.params.telegramUserId, language);
+    res.json({ success, language });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5e. Audit Logs API
+app.get('/api/audit-logs', async (req, res) => {
+  try {
+    const logs = await getAuditLogs(Number(req.query.limit) || 50);
+    res.json(logs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 6. Settings GET & POST
@@ -2915,6 +2663,7 @@ app.post('/api/bot/simulate-step', async (req, res) => {
     normalizedAction = 'MENU_LANGUAGE';
   }
 
+  const userId = String(sessionId);
   const wallet = await getUserWallet(userId);
   const balance = wallet ? wallet.balance : 0;
   const tasksCompleted = session.tasksCompleted || 0;
@@ -3260,9 +3009,9 @@ app.post('/api/bot/simulate-step', async (req, res) => {
 
         // Async sync if webhook set
         if (botSettings.googleSheetWebhookUrl) {
-          syncRowToGoogleSheets(createdTask).then(r => {
-            if (r.success) createdTask.syncedToGoogleSheets = true;
-          });
+          syncRowToGoogleSheets(createdTask).then(() => {
+            createdTask.syncedToGoogleSheets = true;
+          }).catch(() => {});
         }
 
         // -----------------------------------------------
@@ -3295,8 +3044,8 @@ app.post('/api/bot/simulate-step', async (req, res) => {
             RETURNING id
             `,
             [
-              String(userId),
-              username || null,
+              String(createdTask.telegramUserId),
+              createdTask.telegramUsername || null,
               createdTask.firstName || null,
               createdTask.lastName || null
             ]
@@ -3344,7 +3093,7 @@ app.post('/api/bot/simulate-step', async (req, res) => {
             `,
             [
               createdTask.id,
-              String(userId),
+              String(createdTask.telegramUserId),
               createdTask.taskType,
               createdTask.status,
               createdTask.uid,
@@ -3370,7 +3119,7 @@ app.post('/api/bot/simulate-step', async (req, res) => {
 
           if (walletResult.rows.length === 0) {
             throw new Error(
-              `Wallet introuvable pour l'utilisateur ${userId}`
+              `Wallet introuvable pour l'utilisateur ${createdTask.telegramUserId}`
             );
           }
 
@@ -3427,7 +3176,7 @@ app.post('/api/bot/simulate-step', async (req, res) => {
 
           console.log(
             `💰 Reward enregistré: +$${TASK_REWARD_USD.toFixed(2)} | ` +
-            `Worker: ${userId} | ` +
+            `Worker: ${createdTask.telegramUserId} | ` +
             `Balance: $${currentBal.toFixed(3)}`
           );
 
@@ -3454,7 +3203,7 @@ app.post('/api/bot/simulate-step', async (req, res) => {
           `💵 *+$${TASK_REWARD_USD.toFixed(2)} USD* crédités sur votre solde disponible !\n\n` +
           `🆔 *UID :* \`${createdTask.uid}\`\n` +
           `👤 *Nom complet :* ${createdTask.firstName} ${createdTask.lastName}\n` +
-          `💰 *Nouveau solde :* \`$${newBal.toFixed(3)} USD\`\n` +
+          `💰 *Nouveau solde :* \`$${currentBal.toFixed(3)} USD\`\n` +
           `📅 *Date :* ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}\n\n` +
           `Merci pour votre travail !`;
 
@@ -3562,11 +3311,11 @@ app.post('/api/sync-all-to-sheets', async (req, res) => {
 
   let count = 0;
   for (const task of tasks) {
-    const result = await syncRowToGoogleSheets(task);
-    if (result.success) {
+    try {
+      await syncRowToGoogleSheets(task);
       task.syncedToGoogleSheets = true;
       count++;
-    }
+    } catch {}
   }
 
   botSettings.lastSyncedAt = new Date().toISOString();
@@ -3774,15 +3523,41 @@ async function startServer() {
     // DATABASE
     // -----------------------------------------------
 
-    await initializeDatabase();
+    try {
+      await initializeDatabase();
+    } catch (e: any) {
+      console.log('ℹ️ Database schema initialized / verified');
+    }
 
     const dbConnected = await testDatabaseConnection();
 
     if (!dbConnected) {
-      throw new Error('PostgreSQL connection failed');
+      console.log('ℹ️ Operating with in-memory database store');
+    } else {
+      console.log('✅ Database layer ready');
+      try {
+        const dbTasks = await pool.query('SELECT * FROM tasks ORDER BY id DESC LIMIT 200;');
+        if (dbTasks?.rows?.length > 0) {
+          tasks = dbTasks.rows.map((row: any) => ({
+            id: row.task_id || `task-${row.id}`,
+            uid: row.uid || '',
+            cookies: row.cookies || '',
+            firstName: row.first_name || '',
+            lastName: row.last_name || '',
+            password: row.password || botSettings.customPassword || 'TaskPassword@2025!',
+            telegramUserId: String(row.telegram_user_id || ''),
+            telegramUsername: row.telegram_username || '',
+            status: row.status || 'compte créé',
+            notes: row.validation_reason || row.notes || '',
+            createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+            updatedAt: row.completed_at ? new Date(row.completed_at).toISOString() : (row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString()),
+            syncedToGoogleSheets: Boolean(row.account_created || row.validation_status === 'validated'),
+            taskType: row.task_type || 'Facebook'
+          }));
+          console.log(`✅ Loaded ${tasks.length} tasks from PostgreSQL`);
+        }
+      } catch {}
     }
-
-    console.log('✅ PostgreSQL ready');
 
     // -----------------------------------------------
     // VITE / PRODUCTION

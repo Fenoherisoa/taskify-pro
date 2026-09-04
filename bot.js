@@ -59,8 +59,22 @@ const WORKER_WEB_APP_URL =
 const TELEGRAM_BOT_TOKEN =
   process.env.TELEGRAM_BOT_TOKEN;
 
+function normalizeDatabaseUrl(rawUrl) {
+  if (!rawUrl) return '';
+  try {
+    const parsed = new URL(rawUrl);
+    if (/^dpg-[a-z0-9]+-[a-z0-9]+$/i.test(parsed.hostname)) {
+      parsed.hostname = `${parsed.hostname}.oregon-postgres.render.com`;
+      return parsed.toString();
+    }
+    return rawUrl;
+  } catch {
+    return rawUrl;
+  }
+}
+
 const DATABASE_URL =
-  process.env.DATABASE_URL || '';
+  normalizeDatabaseUrl(process.env.DATABASE_URL || '');
 
 const GOOGLE_SHEET_WEBHOOK_URL =
   process.env.GOOGLE_SHEET_WEBHOOK_URL || '';

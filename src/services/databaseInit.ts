@@ -1,4 +1,5 @@
 import { pool } from './database';
+import { initSuperAdmin } from './authService';
 
 /**
  * ============================================================
@@ -66,6 +67,8 @@ export async function initializeDatabase() {
           ON DELETE CASCADE,
 
         balance NUMERIC(12, 4) NOT NULL DEFAULT 0,
+
+        pending_withdrawal NUMERIC(12, 4) NOT NULL DEFAULT 0,
 
         total_earned NUMERIC(12, 4) NOT NULL DEFAULT 0,
 
@@ -193,9 +196,85 @@ export async function initializeDatabase() {
 
         status TEXT NOT NULL DEFAULT 'pending',
 
+        admin_id TEXT,
+
+        admin_notes TEXT,
+
         created_at TIMESTAMPTZ DEFAULT NOW(),
 
-        processed_at TIMESTAMPTZ
+        processed_at TIMESTAMPTZ,
+
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    // ========================================================
+    // 5B. STAFF & SESSIONS (RBAC)
+    // ========================================================
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS staff (
+        id SERIAL PRIMARY KEY,
+
+        username TEXT UNIQUE NOT NULL,
+
+        password_hash TEXT NOT NULL,
+
+        salt TEXT NOT NULL,
+
+        full_name TEXT,
+
+        role TEXT NOT NULL DEFAULT 'ADMIN',
+
+        permissions JSONB DEFAULT '[]'::jsonb,
+
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+        last_login_at TIMESTAMPTZ,
+
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id SERIAL PRIMARY KEY,
+
+        token TEXT UNIQUE NOT NULL,
+
+        staff_id INTEGER NOT NULL
+          REFERENCES staff(id)
+          ON DELETE CASCADE,
+
+        expires_at TIMESTAMPTZ NOT NULL,
+
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    // ========================================================
+    // 5C. NOTIFICATIONS
+    // ========================================================
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+
+        user_id INTEGER NOT NULL
+          REFERENCES users(id)
+          ON DELETE CASCADE,
+
+        title TEXT NOT NULL,
+
+        message TEXT NOT NULL,
+
+        type TEXT DEFAULT 'info',
+
+        is_read BOOLEAN NOT NULL DEFAULT FALSE,
+
+        created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
 
@@ -316,6 +395,20 @@ export async function initializeDatabase() {
     `);
 
     // ========================================================
+    // 9B. AUDIT LOGS
+    // ========================================================
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id SERIAL PRIMARY KEY,
+        action TEXT NOT NULL,
+        actor_id TEXT,
+        details JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    // ========================================================
     // 10. MIGRATIONS - USERS
     // ========================================================
 
@@ -353,6 +446,10 @@ export async function initializeDatabase() {
         NOT NULL DEFAULT 0;
 
       ALTER TABLE wallets
+        ADD COLUMN IF NOT EXISTS pending_withdrawal NUMERIC(12, 4)
+        NOT NULL DEFAULT 0;
+
+      ALTER TABLE wallets
         ADD COLUMN IF NOT EXISTS total_earned NUMERIC(12, 4)
         NOT NULL DEFAULT 0;
 
@@ -363,6 +460,18 @@ export async function initializeDatabase() {
       ALTER TABLE wallets
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ
         DEFAULT NOW();
+    `);
+
+    // Migrations for withdrawals
+    await pool.query(`
+      ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS admin_id TEXT;
+
+      ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS admin_notes TEXT;
+
+      ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
     `);
 
     // ========================================================
@@ -425,6 +534,12 @@ export async function initializeDatabase() {
 
       ALTER TABLE tasks
         ADD COLUMN IF NOT EXISTS reward_paid_at TIMESTAMPTZ;
+
+      ALTER TABLE tasks
+        ADD COLUMN IF NOT EXISTS synced_to_sheets BOOLEAN NOT NULL DEFAULT FALSE;
+
+      ALTER TABLE tasks
+        ADD COLUMN IF NOT EXISTS synced_to_sheets_at TIMESTAMPTZ;
 
       ALTER TABLE tasks
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ
@@ -623,6 +738,9 @@ export async function initializeDatabase() {
     const statistics =
       result.rows[0];
 
+    // Initialize Super Admin account if not present
+    await initSuperAdmin();
+
     // ========================================================
     // 20. SUCCESS
     // ========================================================
@@ -663,13 +781,10 @@ export async function initializeDatabase() {
       statistics.rejected_tasks
     );
 
-  } catch (error) {
-
-    console.error(
-      '❌ PostgreSQL initialization failed:',
-      error
+  } catch (error: any) {
+    console.warn(
+      '⚠️ PostgreSQL initialization warning (continuing with in-memory store):',
+      error.message
     );
-
-    throw error;
   }
 }

@@ -678,3 +678,50 @@ export async function sendToGoogleSheetsWebhook(task: TaskRecord, webhookUrl: st
   }
 }
 
+export async function validateTaskApi(taskId: string, validatorId: string = 'admin', notes: string = ''): Promise<{ success: boolean; task?: TaskRecord; message?: string }> {
+  const res = await safeFetchJson<{ success: boolean; task?: TaskRecord; message?: string }>(`/api/tasks/${taskId}/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ validatorId, notes })
+  });
+  if (res && res.success) {
+    addClientLog('success', 'system', `Tâche ${taskId} validée avec succès`);
+    return res;
+  }
+  return { success: false, message: res?.message || 'Erreur validation' };
+}
+
+export async function rejectTaskApi(taskId: string, validatorId: string = 'admin', reason: string = ''): Promise<{ success: boolean; task?: TaskRecord; message?: string }> {
+  const res = await safeFetchJson<{ success: boolean; task?: TaskRecord; message?: string }>(`/api/tasks/${taskId}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ validatorId, reason })
+  });
+  if (res && res.success) {
+    addClientLog('warning', 'system', `Tâche ${taskId} rejetée: ${reason}`);
+    return res;
+  }
+  return { success: false, message: res?.message || 'Erreur rejet' };
+}
+
+export async function fetchWithdrawals(status?: string): Promise<any[]> {
+  const query = status ? `?status=${status}` : '';
+  const res = await safeFetchJson<any[]>(`/api/withdrawals${query}`);
+  return res || [];
+}
+
+export async function processWithdrawalApi(id: number, action: 'approve' | 'reject', adminId: string = 'admin', notes?: string): Promise<{ success: boolean; message?: string }> {
+  const res = await safeFetchJson<{ success: boolean; message?: string }>(`/api/withdrawals/${id}/process`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, adminId, notes })
+  });
+  return res || { success: false };
+}
+
+export async function fetchAuditLogs(limit: number = 50): Promise<any[]> {
+  const res = await safeFetchJson<any[]>(`/api/audit-logs?limit=${limit}`);
+  return res || [];
+}
+
+

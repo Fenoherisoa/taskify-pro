@@ -105,6 +105,17 @@ export default function TelegramMiniApp() {
   const [taskStep, setTaskStep] =
     useState<'type' | 'form'>('type');
 
+  // Withdrawal state
+  const [withdrawAmount, setWithdrawAmount] = useState('1.00');
+  const [withdrawMethod, setWithdrawMethod] = useState('MVola');
+  const [withdrawDestination, setWithdrawDestination] = useState('');
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
+  const [withdrawMessage, setWithdrawMessage] = useState('');
+
+  // Language state
+  const [currentLanguage, setCurrentLanguage] = useState('fr');
+  const [languageMessage, setLanguageMessage] = useState('');
+
   const fullName = useMemo(() => {
     return `${firstName} ${lastName}`.trim();
   }, [firstName, lastName]);
@@ -1050,6 +1061,205 @@ export default function TelegramMiniApp() {
     </section>
   );
 
+  const handleWithdrawSubmit = async () => {
+    if (!userId) {
+      setWithdrawMessage('Erreur: Identifiant Telegram introuvable');
+      return;
+    }
+    const amt = parseFloat(withdrawAmount);
+    if (isNaN(amt) || amt < 1.0) {
+      setWithdrawMessage('Le montant minimum de retrait est de $1.00 USD');
+      return;
+    }
+    if (!withdrawDestination.trim()) {
+      setWithdrawMessage('Veuillez renseigner votre numéro ou adresse de réception');
+      return;
+    }
+    setWithdrawLoading(true);
+    setWithdrawMessage('');
+    try {
+      const res = await fetch('/api/withdrawals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telegramUserId: userId,
+          amount: amt,
+          method: withdrawMethod,
+          destination: withdrawDestination.trim()
+        })
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        haptic();
+        setWithdrawMessage('✅ Demande de retrait envoyée avec succès! Traitement sous 24-48h.');
+        setWithdrawDestination('');
+        loadBalance();
+      } else {
+        setWithdrawMessage(`❌ Erreur: ${json.message || 'Échec du retrait'}`);
+      }
+    } catch (err: any) {
+      setWithdrawMessage(`❌ Erreur: ${err.message}`);
+    } finally {
+      setWithdrawLoading(false);
+    }
+  };
+
+  const handleLanguageChange = async (lang: string) => {
+    setCurrentLanguage(lang);
+    if (userId) {
+      try {
+        await fetch(`/api/user/${userId}/language`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ language: lang })
+        });
+        haptic();
+        setLanguageMessage('Langue mise à jour avec succès !');
+        setTimeout(() => setLanguageMessage(''), 3000);
+      } catch (err) {
+        console.error('Failed to set language:', err);
+      }
+    }
+  };
+
+  const renderWithdraw = () => (
+    <section className="tm-screen">
+      {renderBackButton()}
+      <div className="tm-screen-title">
+        <span>🏦</span>
+        <div>
+          <h2>Demande de Retrait</h2>
+          <p>Seuil minimum: $1.00 USD</p>
+        </div>
+      </div>
+
+      <div className="tm-card tm-task-form">
+        <div className="tm-profile-box">
+          <div>
+            <small>SOLDE DISPONIBLE</small>
+            <strong>${(data?.wallet?.balance || 0).toFixed(2)} USD</strong>
+          </div>
+          <button
+            type="button"
+            onClick={() => setWithdrawAmount(String(data?.wallet?.balance || 1))}
+          >
+            Max
+          </button>
+        </div>
+
+        <label>Montant (USD)</label>
+        <input
+          type="number"
+          step="0.1"
+          min="1"
+          value={withdrawAmount}
+          onChange={(e) => setWithdrawAmount(e.target.value)}
+          placeholder="Montant en USD (min 1.00)"
+        />
+
+        <label>Méthode de paiement</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+          {[
+            { id: 'MVola', label: '🇲🇬 MVola' },
+            { id: 'Orange Money', label: '🍊 Orange' },
+            { id: 'Airtel Money', label: '🔴 Airtel' },
+            { id: 'USDT (TRC20)', label: '₮ USDT TRC20' }
+          ].map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => {
+                haptic();
+                setWithdrawMethod(m.id);
+              }}
+              style={{
+                padding: '10px',
+                borderRadius: '8px',
+                border: withdrawMethod === m.id ? '2px solid #2563eb' : '1px solid #334155',
+                background: withdrawMethod === m.id ? '#1e293b' : '#0f172a',
+                color: '#fff',
+                fontSize: '13px',
+                cursor: 'pointer'
+              }}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <label>Numéro ou Adresse de réception</label>
+        <input
+          value={withdrawDestination}
+          onChange={(e) => setWithdrawDestination(e.target.value)}
+          placeholder={withdrawMethod.includes('USDT') ? 'Adresse TRC20 (T...)' : 'Numéro de téléphone (ex: 034...)'}
+        />
+
+        <button
+          type="button"
+          className="tm-submit-task"
+          disabled={withdrawLoading}
+          onClick={handleWithdrawSubmit}
+        >
+          {withdrawLoading ? '⏳ TRAITEMENT...' : 'CONFIRMER LE RETRAIT'}
+        </button>
+
+        {withdrawMessage && (
+          <div className="tm-task-message" style={{ marginTop: '12px' }}>
+            {withdrawMessage}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
+  const renderLanguage = () => (
+    <section className="tm-screen">
+      {renderBackButton()}
+      <div className="tm-screen-title">
+        <span>🌐</span>
+        <div>
+          <h2>Choix de la langue</h2>
+          <p>Sélectionnez votre langue de préférence</p>
+        </div>
+      </div>
+
+      <div className="tm-card" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {[
+          { code: 'fr', label: 'Français', flag: '🇫🇷' },
+          { code: 'mg', label: 'Malagasy', flag: '🇲🇬' },
+          { code: 'en', label: 'English', flag: '🇬🇧' }
+        ].map((l) => (
+          <button
+            key={l.code}
+            type="button"
+            onClick={() => handleLanguageChange(l.code)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '14px',
+              borderRadius: '8px',
+              border: currentLanguage === l.code ? '2px solid #2563eb' : '1px solid #334155',
+              background: currentLanguage === l.code ? '#1e293b' : '#0f172a',
+              color: '#fff',
+              fontSize: '15px',
+              cursor: 'pointer'
+            }}
+          >
+            <span>{l.flag} {l.label}</span>
+            {currentLanguage === l.code && <span style={{ color: '#38bdf8' }}>✓ Actif</span>}
+          </button>
+        ))}
+
+        {languageMessage && (
+          <div className="tm-task-message" style={{ marginTop: '10px' }}>
+            {languageMessage}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
   /*
    * ----------------------------------------------------
    * SCREEN ROUTER
@@ -1065,11 +1275,7 @@ export default function TelegramMiniApp() {
         return renderTasks();
 
       case 'withdraw':
-        return renderSimpleScreen(
-          '🏦',
-          'Retrait',
-          'Demandez votre paiement.'
-        );
+        return renderWithdraw();
 
       case 'support':
         return renderSimpleScreen(
@@ -1093,11 +1299,7 @@ export default function TelegramMiniApp() {
         );
 
       case 'language':
-        return renderSimpleScreen(
-          '🌐',
-          'Langue',
-          'Choisissez votre langue.'
-        );
+        return renderLanguage();
 
       default:
         return renderHome();
