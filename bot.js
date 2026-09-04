@@ -816,145 +816,467 @@ bot.action('action_cancel', async (ctx) => {
 });
 
 // ====================================================
-// 9. TEXT INPUT INTERCEPTOR (UID & COOKIES)
+// 9. TEXT INPUT INTERCEPTOR
+// UID & TASK SUBMISSION
 // ====================================================
 bot.on('text', async (ctx) => {
   const userId = String(ctx.from?.id || 'unknown');
-  const username = ctx.from?.username || ctx.from?.first_name || 'utilisateur';
+  const username =
+    ctx.from?.username ||
+    ctx.from?.first_name ||
+    'utilisateur';
+
   const text = ctx.message.text.trim();
   const lowerText = text.toLowerCase();
-  const session = userSessions[userId];
-  const user = getUserData(userId, ctx.from?.username, ctx.from?.first_name);
 
-  // Instant Priority Dispatch for Persistent Keyboard Buttons
-  if (text.includes('Solde') || lowerText === 'solde' || lowerText === '/solde' || lowerText === '/balance') {
+  const session = userSessions[userId];
+  const user = getUserData(
+    userId,
+    ctx.from?.username,
+    ctx.from?.first_name
+  );
+
+  // ====================================================
+  // PERSISTENT KEYBOARD DISPATCH
+  // ====================================================
+
+  if (
+    text.includes('Solde') ||
+    lowerText === 'solde' ||
+    lowerText === '/solde' ||
+    lowerText === '/balance'
+  ) {
     return handleBalanceMenu(ctx);
   }
-  if (text.includes('Tâches') || text.includes('Taches') || text.includes('Démarrer tâche') || lowerText === 'taches' || lowerText === 'tâches' || lowerText === '/tasks' || lowerText === '/taches') {
+
+  if (
+    text.includes('Tâches') ||
+    text.includes('Taches') ||
+    text.includes('Démarrer tâche') ||
+    lowerText === 'taches' ||
+    lowerText === 'tâches' ||
+    lowerText === '/tasks' ||
+    lowerText === '/taches' ||
+    lowerText === '/task'
+  ) {
     return handleTasksMenu(ctx);
   }
-  if (text.includes('Retrait') || lowerText === 'retrait' || lowerText === '/withdraw' || lowerText === '/retrait') {
+
+  if (
+    text.includes('Retrait') ||
+    lowerText === 'retrait' ||
+    lowerText === '/withdraw' ||
+    lowerText === '/retrait'
+  ) {
     return handleWithdrawalMenu(ctx);
   }
-  if (text.includes('Support') || text.includes('Assistance') || lowerText === 'support' || lowerText === '/support') {
+
+  if (
+    text.includes('Support') ||
+    text.includes('Assistance') ||
+    lowerText === 'support' ||
+    lowerText === '/support'
+  ) {
     return handleSupportMenu(ctx);
   }
-  if (text.includes('Parrainage') || text.includes('Parrainages') || lowerText === 'parrainage' || lowerText === '/referral') {
+
+  if (
+    text.includes('Parrainage') ||
+    text.includes('Parrainages') ||
+    lowerText === 'parrainage' ||
+    lowerText === '/referral'
+  ) {
     return handleReferralMenu(ctx);
   }
-  if (text.includes('Classement') || lowerText === 'classement' || lowerText === '/leaderboard' || lowerText === '/top') {
+
+  if (
+    text.includes('Classement') ||
+    lowerText === 'classement' ||
+    lowerText === '/leaderboard' ||
+    lowerText === '/top'
+  ) {
     return handleLeaderboardMenu(ctx);
   }
-  if (text.includes('Langue') || text.includes('Langues') || lowerText === 'langue' || lowerText === 'language' || lowerText === '/language') {
+
+  if (
+    text.includes('Langue') ||
+    text.includes('Langues') ||
+    lowerText === 'langue' ||
+    lowerText === 'language' ||
+    lowerText === '/language' ||
+    lowerText === '/langue'
+  ) {
     return handleLanguageMenu(ctx);
   }
 
-  // If no active task session, guide user back to menu with helpful quick actions
+  // ====================================================
+  // NO ACTIVE SESSION
+  // ====================================================
+
   if (!session || !session.step || session.step === 'START') {
     return ctx.reply(
-      `👋 Bonjour *${user.firstName}* !\n\nUtilisez le menu ci-dessous pour gérer vos tâches ou tapez /start pour réinitialiser l'affichage.`,
+      `👋 Bonjour *${user.firstName}* !\n\n` +
+      `Utilisez le menu ci-dessous pour gérer vos tâches ` +
+      `ou tapez /start pour réinitialiser l'affichage.`,
       {
         parse_mode: 'Markdown',
         ...MAIN_REPLY_KEYBOARD,
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('🚀 Démarrer une Tâche Facebook', 'task_facebook')],
-          [Markup.button.callback('💰 Voir mon Solde', 'action_check_balance')]
+          [
+            Markup.button.callback(
+              '🚀 Démarrer une Tâche Facebook',
+              'task_facebook'
+            )
+          ],
+          [
+            Markup.button.callback(
+              '💰 Voir mon Solde',
+              'action_check_balance'
+            )
+          ]
         ])
       }
     );
   }
 
-  // Étape 1 : Réception de l'UID
+  // ====================================================
+  // ÉTAPE 1 : UID
+  // ====================================================
+
   if (session.step === 'AWAITING_UID') {
+
+    // Basic validation
+    if (!/^\d{5,20}$/.test(text)) {
+      return ctx.reply(
+        `⚠️ *UID invalide.*\n\n` +
+        `Veuillez envoyer uniquement l'UID numérique demandé.`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                '❌ Annuler',
+                'action_cancel'
+              )
+            ]
+          ])
+        }
+      );
+    }
+
     session.uid = text;
     session.step = 'AWAITING_COOKIES';
 
     await ctx.reply(
-      `✅ *UID reçu avec succès :* \`${text}\`\n\n` +
-      `🍪 *Étape 2/2 : Envoi des Cookies*\n\n` +
-      `Veuillez maintenant coller vos **Cookies Facebook** complets (ex: format \`datr=...; c_user=...; xs=...\`) :`,
+      `✅ *UID reçu.*\n\n` +
+      `La prochaine étape consiste à soumettre les informations ` +
+      `nécessaires à la vérification de la tâche.\n\n` +
+      `⚠️ N'envoyez pas de mot de passe personnel ni de jeton ` +
+      `de session dans le chat.`,
       {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('❌ Annulation processus', 'action_cancel')]
+          [
+            Markup.button.callback(
+              '❌ Annuler',
+              'action_cancel'
+            )
+          ]
         ])
       }
     );
+
     return;
   }
 
-  // Étape 2 : Réception des Cookies & Enregistrement Final
+  // ====================================================
+  // ÉTAPE 2 : SOUMISSION
+  // ====================================================
+  //
+  // IMPORTANT :
+  //
+  // ❌ PAS de user.balance += reward
+  // ❌ PAS de user.tasksCompleted += 1
+  // ❌ PAS de "Tâche validée"
+  //
+  // La tâche est uniquement enregistrée en PENDING.
+  //
+  // ====================================================
+
   if (session.step === 'AWAITING_COOKIES') {
-    session.cookies = text;
+
+    /*
+     * IMPORTANT SECURITY NOTE
+     * -----------------------
+     * Tsy mitahiry na mandefa session cookies / credentials
+     * amin'ny bot izahay.
+     *
+     * Raha manana mécanisme de vérification ara-dalàna
+     * ny backend, tokony hampiasa token/reference sécurisé
+     * fa tsy session cookie.
+     */
 
     const taskRecord = {
-      id: `task-${Date.now()}`,
+      id: `task-${Date.now()}-${userId}`,
+
       uid: session.uid || 'Non fourni',
-      cookies: session.cookies,
-      firstName: session.firstName || 'Alexandre',
-      lastName: session.lastName || 'Dubois',
-      password: session.password || DEFAULT_BOT_PASSWORD,
+
       telegramUserId: userId,
       telegramUsername: username,
-      status: 'compte créé',
-      notes: `Enregistré via ${PLATFORM_NAME} (@TaskifyProBot)`,
+
+      firstName: session.firstName || user.firstName || 'Utilisateur',
+      lastName: session.lastName || '',
+
+      taskType: session.taskType || 'Facebook',
+
+      // ==================================================
+      // VALIDATION STATE
+      // ==================================================
+
+      status: 'pending',
+      validation_status: 'pending',
+
+      // Reward mbola TSY voaloa
+      reward_paid: false,
+
+      // Tsy mbola validated
+      validated_at: null,
+      validated_by: null,
+      validation_reason: null,
+
+      // Tsy mbola account_created
+      account_created: false,
+      account_created_at: null,
+
+      // Reward prévu ihany
+      reward_amount: TASK_REWARD_EUR,
+
       timestamp: new Date().toISOString(),
-      taskType: session.taskType || 'Facebook'
+
+      notes:
+        `Soumission reçue via ${PLATFORM_NAME}. ` +
+        `Statut initial : PENDING. ` +
+        `Validation administrateur requise.`
     };
 
-    // Update User Ledger
-    user.tasksCompleted += 1;
-    user.balance += TASK_REWARD_EUR;
+    try {
 
-    // Check if user was referred, credit referrer
-    if (user.referredBy && userLedger[user.referredBy]) {
-      userLedger[user.referredBy].balance += REFERRAL_COMMISSION_EUR;
-      userLedger[user.referredBy].referralEarnings += REFERRAL_COMMISSION_EUR;
-      console.log(`[Referral Reward] +${REFERRAL_COMMISSION_EUR}€ crédités au parrain ${user.referredBy}`);
+      // ==================================================
+      // PENDING TASK STORAGE
+      // ==================================================
+
+      if (!Array.isArray(user.pendingTasks)) {
+        user.pendingTasks = [];
+      }
+
+      user.pendingTasks.push(taskRecord);
+
+      // ==================================================
+      // IMPORTANT :
+      // AUCUN REWARD ICI
+      // ==================================================
+
+      // NE PAS FAIRE :
+      //
+      // user.balance += TASK_REWARD_EUR;
+      // user.tasksCompleted += 1;
+      //
+      // Ireo dia hatao rehefa ADMIN VALIDATE ihany.
+
+      // ==================================================
+      // GOOGLE SHEETS
+      // ==================================================
+      //
+      // Raha mbola ampiasaina ny webhook Google Sheets,
+      // alefa miaraka amin'ny status PENDING.
+      //
+
+      try {
+        await syncToGoogleSheets({
+          ...taskRecord,
+          status: 'pending',
+          validation_status: 'pending',
+          reward_paid: false,
+          account_created: false
+        });
+      } catch (sheetError) {
+        console.error(
+          '[Google Sheets] Pending sync failed:',
+          sheetError
+        );
+
+        // Tsy tokony hanova ny statut ho VALIDATED
+        // noho ny erreur Google Sheets.
+      }
+
+      // ==================================================
+      // CLEAR SESSION
+      // ==================================================
+
+      delete userSessions[userId];
+
+      // ==================================================
+      // WORKER RESPONSE
+      // ==================================================
+
+      await ctx.reply(
+        `⏳ *Soumission reçue !*\n\n` +
+
+        `Votre tâche a bien été enregistrée.` +
+        `\n\n` +
+
+        `🆔 *Task ID :* \`${taskRecord.id}\`\n` +
+        `📌 *Statut :* ⏳ *PENDING*\n` +
+        `👤 *UID :* \`${taskRecord.uid}\`\n` +
+        `💵 *Reward prévu :* ${TASK_REWARD_EUR.toFixed(2)} €\n\n` +
+
+        `🔎 *Validation administrateur requise.*\n\n` +
+
+        `⚠️ Aucun montant n'a encore été crédité ` +
+        `sur votre solde.\n\n` +
+
+        `Après validation par l'administrateur :\n` +
+        `✅ la tâche passera en VALIDATED\n` +
+        `💰 le reward sera crédité\n` +
+        `📊 votre solde sera mis à jour\n\n` +
+
+        `_Vous recevrez une notification Telegram ` +
+        `lorsque la décision sera prise._`,
+        {
+          parse_mode: 'Markdown',
+          ...MAIN_REPLY_KEYBOARD,
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                '📋 Mes tâches',
+                'action_my_tasks'
+              )
+            ],
+            [
+              Markup.button.callback(
+                '💰 Mon solde',
+                'action_check_balance'
+              )
+            ],
+            [
+              Markup.button.callback(
+                '🚀 Nouvelle tâche',
+                'task_facebook'
+              )
+            ]
+          ])
+        }
+      );
+
+      console.log(
+        `[TASK PENDING] ` +
+        `id=${taskRecord.id} ` +
+        `user=${userId} ` +
+        `uid=${taskRecord.uid} ` +
+        `status=PENDING`
+      );
+
+    } catch (error) {
+
+      console.error(
+        `[TASK SUBMISSION ERROR] user=${userId}:`,
+        error
+      );
+
+      await ctx.reply(
+        `❌ *Erreur lors de l'enregistrement.*\n\n` +
+        `Votre tâche n'a pas été validée ` +
+        `et aucun reward n'a été crédité.\n\n` +
+        `Veuillez réessayer plus tard.`,
+        {
+          parse_mode: 'Markdown',
+          ...MAIN_REPLY_KEYBOARD
+        }
+      );
     }
 
-    // Clear user conversational session
-    delete userSessions[userId];
-
-    // Asynchronous Dispatch to Google Sheets Webhook
-    syncToGoogleSheets(taskRecord);
-
-    await ctx.reply(
-      `🎉 *Tâche validée avec succès !*\n\n` +
-      `✅ Vos données ont été enregistrées sur le système.\n` +
-      `💵 *+${TASK_REWARD_EUR.toFixed(2)} €* crédités sur votre solde disponible !\n\n` +
-      `🆔 *UID :* \`${taskRecord.uid}\`\n` +
-      `👤 *Nom complet :* ${taskRecord.firstName} ${taskRecord.lastName}\n` +
-      `🔑 *Mot de passe :* \`${taskRecord.password}\`\n` +
-      `💰 *Nouveau solde :* \`${user.balance.toFixed(2)} €\`\n` +
-      `📅 *Date :* ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}\n\n` +
-      `_Merci pour votre travail ! Vous pouvez lancer une nouvelle tâche immédiatement._`,
-      {
-        parse_mode: 'Markdown',
-        ...MAIN_REPLY_KEYBOARD,
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🚀 Nouvelle Tâche Facebook', 'task_facebook')],
-          [Markup.button.callback('💰 Consulter mon Solde', 'action_check_balance')]
-        ])
-      }
-    );
     return;
   }
 });
 
+
+// ====================================================
+// 10. BALANCE
+// ====================================================
+
 bot.action('action_check_balance', async (ctx) => {
+
   await ctx.answerCbQuery();
-  const userId = String(ctx.from?.id || 'unknown');
-  const user = getUserData(userId, ctx.from?.username, ctx.from?.first_name);
+
+  const userId = String(
+    ctx.from?.id || 'unknown'
+  );
+
+  const user = getUserData(
+    userId,
+    ctx.from?.username,
+    ctx.from?.first_name
+  );
+
+  // ==================================================
+  // CALCUL DES TASKS PENDING
+  // ==================================================
+
+  const pendingTasks = Array.isArray(user.pendingTasks)
+    ? user.pendingTasks.filter(
+        task =>
+          task.validation_status === 'pending' ||
+          task.status === 'pending'
+      )
+    : [];
+
+  const pendingAmount = pendingTasks.reduce(
+    (total, task) =>
+      total + Number(task.reward_amount || 0),
+    0
+  );
+
+  // ==================================================
+  // BALANCE DISPLAY
+  // ==================================================
 
   await renderScreen(
     ctx,
-    `💰 *Votre Solde Actuel :* \`${user.balance.toFixed(2)} €\`\n` +
-    `📊 *Tâches complétées :* \`${user.tasksCompleted}\`\n` +
-    `⏳ *En cours de validation :* \`0.00 €\``,
+
+    `💰 *Votre Solde Actuel :* ` +
+    `\`${Number(user.balance || 0).toFixed(2)} €\`\n\n` +
+
+    `📊 *Tâches validées :* ` +
+    `\`${Number(user.tasksCompleted || 0)}\`\n\n` +
+
+    `⏳ *En attente de validation :* ` +
+    `\`${pendingTasks.length}\` tâche(s)\n` +
+
+    `💵 *Reward en attente :* ` +
+    `\`${pendingAmount.toFixed(2)} €\`\n\n` +
+
+    `ℹ️ Les rewards en attente ne sont pas encore ` +
+    `inclus dans votre solde disponible.`,
+
     Markup.inlineKeyboard([
-      [Markup.button.callback('🚀 Nouvelle Tâche', 'task_facebook')],
-      [Markup.button.callback('🏦 Demander un Retrait', 'action_request_withdrawal')]
+      [
+        Markup.button.callback(
+          '📋 Mes tâches',
+          'action_my_tasks'
+        )
+      ],
+      [
+        Markup.button.callback(
+          '🚀 Nouvelle tâche',
+          'task_facebook'
+        )
+      ],
+      [
+        Markup.button.callback(
+          '🏦 Demander un retrait',
+          'action_request_withdrawal'
+        )
+      ]
     ])
   );
 });
