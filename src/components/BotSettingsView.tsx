@@ -16,7 +16,8 @@ import {
   Copy,
   Check,
   Code2,
-  Sparkles
+  Sparkles,
+  ShieldCheck
 } from 'lucide-react';
 import { BotSettings, GoogleSheetField } from '../types';
 
@@ -35,6 +36,11 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
   const [googleSheetWebhookUrl, setGoogleSheetWebhookUrl] = useState(settings.googleSheetWebhookUrl || '');
   const [botToken, setBotToken] = useState(settings.botToken || '');
   const [platformName, setPlatformName] = useState(settings.platformName || 'Taskify Pro');
+  const [autoBotCheckEnabled, setAutoBotCheckEnabled] = useState(settings.autoBotCheckEnabled ?? true);
+  const [facebookCheckerApiUrl, setFacebookCheckerApiUrl] = useState(settings.facebookCheckerApiUrl || '');
+  const [facebookCheckerApiKey, setFacebookCheckerApiKey] = useState(settings.facebookCheckerApiKey || '');
+  const [testUid, setTestUid] = useState('4');
+  const [testUidStatus, setTestUidStatus] = useState<{ loading: boolean; success?: boolean; msg?: string } | null>(null);
   
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -170,7 +176,10 @@ function doPost(e) {
         googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
         botToken: botToken.trim(),
         platformName: platformName.trim(),
-        googleSheetFields: googleSheetFields
+        googleSheetFields: googleSheetFields,
+        autoBotCheckEnabled,
+        facebookCheckerApiUrl: facebookCheckerApiUrl.trim(),
+        facebookCheckerApiKey: facebookCheckerApiKey.trim()
       });
 
       setSaveSuccess(true);
@@ -181,6 +190,44 @@ function doPost(e) {
 
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleTestUidChecker = async () => {
+    if (!testUid.trim()) return;
+    setTestUidStatus({ loading: true });
+    try {
+      const res = await fetch('/api/bot/test-uid-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: testUid.trim(),
+          apiUrl: facebookCheckerApiUrl.trim(),
+          apiKey: facebookCheckerApiKey.trim()
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTestUidStatus({
+          loading: false,
+          success: data.result === 'GREEN',
+          msg: data.result === 'GREEN'
+            ? `✅ UID ${testUid} VÉRIFIÉ (GREEN / Compte valide)`
+            : `❌ UID ${testUid} REJETÉ (RED / Compte invalide ou inexistant)`
+        });
+      } else {
+        setTestUidStatus({
+          loading: false,
+          success: false,
+          msg: `⚠️ Erreur du service : ${data.error || 'Impossible de vérifier l\'UID'}`
+        });
+      }
+    } catch (err: any) {
+      setTestUidStatus({
+        loading: false,
+        success: false,
+        msg: `Erreur de connexion : ${err.message}`
+      });
     }
   };
 
@@ -501,7 +548,97 @@ function doPost(e) {
           )}
         </div>
 
-        {/* 4. Platform Title */}
+        {/* 4. Automatic Bot Check (Facebook UID Checker) */}
+        <div className="p-6 rounded-2xl glass-card border border-slate-800/80 shadow-xl space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base font-sans">
+                  Vérification Automatique par le Bot (Facebook UID Checker)
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Interroge l'API Facebook pour vérifier l'existence et la validité de l'UID soumis.
+                </p>
+              </div>
+            </div>
+
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoBotCheckEnabled}
+                onChange={(e) => setAutoBotCheckEnabled(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 font-mono">
+                URL Service / API Facebook Checker (Optionnel)
+              </label>
+              <input
+                type="url"
+                value={facebookCheckerApiUrl}
+                onChange={(e) => setFacebookCheckerApiUrl(e.target.value)}
+                placeholder="https://graph.facebook.com ou service dédié"
+                className="w-full px-4 py-2.5 bg-slate-950/90 border border-slate-800 rounded-xl text-slate-200 font-mono text-xs focus:outline-none focus:border-indigo-500 transition-all"
+              />
+              <span className="text-[11px] text-slate-500 mt-1 block">
+                Laissez vide pour utiliser le service de vérification UID intégré (Graph API & Picture Check).
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 font-mono">
+                Clé API / Token Facebook Checker (Optionnel)
+              </label>
+              <input
+                type="password"
+                value={facebookCheckerApiKey}
+                onChange={(e) => setFacebookCheckerApiKey(e.target.value)}
+                placeholder="Ex: EAAB..."
+                className="w-full px-4 py-2.5 bg-slate-950/90 border border-slate-800 rounded-xl text-slate-200 font-mono text-xs focus:outline-none focus:border-indigo-500 transition-all"
+              />
+            </div>
+          </div>
+
+          {/* Test Live UID Checker */}
+          <div className="pt-3 border-t border-slate-800/80">
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5 font-mono">
+              Tester la Vérification d'un UID Facebook en Direct
+            </label>
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <input
+                type="text"
+                value={testUid}
+                onChange={(e) => setTestUid(e.target.value)}
+                placeholder="Ex: 4 ou 100084729182741"
+                className="w-full sm:w-64 px-4 py-2 bg-slate-950/90 border border-slate-800 rounded-xl text-slate-200 font-mono text-xs focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                type="button"
+                onClick={handleTestUidChecker}
+                disabled={testUidStatus?.loading || !testUid}
+                className="px-4 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-bold transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {testUidStatus?.loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 text-indigo-400" />}
+                <span>Tester UID</span>
+              </button>
+            </div>
+            {testUidStatus && (
+              <p className={`text-xs mt-2 font-mono font-medium ${testUidStatus.success ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {testUidStatus.msg}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* 5. Platform Title */}
         <div className="p-6 rounded-2xl glass-card border border-slate-800/80 shadow-xl space-y-4">
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 font-mono">

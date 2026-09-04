@@ -225,3 +225,39 @@ export async function getUserProfile(telegramUserId: string | number) {
     statistics
   };
 }
+
+/**
+ * Récupérer tous les portefeuilles pour l'administration
+ */
+export async function getAllWallets(): Promise<any[]> {
+  try {
+    const result = await pool.query(`
+      SELECT
+        w.id,
+        w.user_id,
+        w.balance,
+        w.pending_withdrawal,
+        w.total_earned,
+        w.total_withdrawn,
+        w.updated_at,
+        u.telegram_user_id,
+        u.telegram_username,
+        u.first_name,
+        u.last_name,
+        u.language
+      FROM wallets w
+      LEFT JOIN users u ON u.id = w.user_id
+      ORDER BY w.id DESC
+    `);
+    return result.rows.map((row: any) => ({
+      ...row,
+      balance: Number(row.balance),
+      pending_withdrawal: Number(row.pending_withdrawal || 0),
+      total_earned: Number(row.total_earned),
+      total_withdrawn: Number(row.total_withdrawn)
+    }));
+  } catch (err: any) {
+    console.error('❌ Failed to fetch all wallets:', err.message);
+    return [];
+  }
+}

@@ -1,14 +1,72 @@
+/**
+ * ============================================================
+ * TASKIFY PRO - TASK & VERIFICATION SERVICE
+ * ============================================================
+ * Handles task creation, verification (Admin & Bot check),
+ * reward credits with transaction-level anti-double-spend locks,
+ * Google Sheets synchronization, and audit logging.
+ */
+
 import { pool } from './database';
-import { TaskRecord, TaskStatus } from '../types';
+import {
+  TaskRecord,
+  TaskStatus,
+  AccountStatus,
+  VerificationStatus,
+  VerificationMethod,
+  VerificationResult
+} from '../types';
 import { getOrCreateUser } from './userService';
 import { syncTaskToGoogleSheets } from './sheetsService';
 import { logAudit } from './auditService';
-import { createNotification } from './notificationService';
+import { createNotification, sendTelegramVerificationMessage } from './notificationService';
+import { checkFacebookUid } from './facebookCheckerService';
 
 /**
  * Maps a database row from `tasks` (optionally joined with `users`) into a frontend `TaskRecord`
  */
 export function mapDbTaskToRecord(row: any): TaskRecord {
+  // Infer account status if empty
+  let accountStatus: AccountStatus = (row.account_status as AccountStatus) || 'pending_verification';
+  if (!row.account_status) {
+    if (row.status === 'compte créé' || row.status === 'vérifié' || row.validation_status === 'validated') {
+      accountStatus = 'verified';
+    } else if (row.status === 'compte suspendu' || row.status === 'annulé' || row.validation_status === 'rejected') {
+      accountStatus = 'suspended';
+    } else {
+      accountStatus = 'pending_verification';
+    }
+  }
+
+  let verificationStatus: VerificationStatus = (row.verification_status as VerificationStatus) || 'pending';
+  if (!row.verification_status) {
+    if (row.validation_status === 'validated' || accountStatus === 'verified') {
+      verificationStatus = 'verified';
+    } else if (row.validation_status === 'rejected' || accountStatus === 'suspended') {
+      verificationStatus = 'rejected';
+    } else {
+      verificationStatus = 'pending';
+    }
+  }
+
+  let verificationMethod: VerificationMethod = (row.verification_method as VerificationMethod) || 'NONE';
+  if (!row.verification_method || row.verification_method === 'NONE') {
+    if (row.validated_by && row.validated_by.toUpperCase().includes('BOT')) {
+      verificationMethod = 'BOT';
+    } else if (row.validated_by) {
+      verificationMethod = 'ADMIN';
+    }
+  }
+
+  let verificationResult: VerificationResult = (row.verification_result as VerificationResult) || 'PENDING';
+  if (!row.verification_result || row.verification_result === 'PENDING') {
+    if (verificationStatus === 'verified') {
+      verificationResult = 'GREEN';
+    } else if (verificationStatus === 'rejected') {
+      verificationResult = 'RED';
+    }
+  }
+
   return {
     id: row.task_id || `task-${row.id}`,
     uid: row.uid || '',
@@ -19,23 +77,28 @@ export function mapDbTaskToRecord(row: any): TaskRecord {
     telegramUserId: row.telegram_user_id || '',
     telegramUsername: row.telegram_username || 'anonyme',
     status: (row.status || 'pending') as TaskStatus,
+    accountStatus,
+    verificationStatus,
+    verificationMethod,
+    verificationResult,
     validationStatus: row.validation_status || 'pending',
-    validationReason: row.validation_reason || null,
-    validatedAt: row.validated_at ? new Date(row.validated_at).toISOString() : null,
-    validatedBy: row.validated_by || null,
+    validationReason: row.verification_reason || row.validation_reason || null,
+    validatedAt: row.verified_at ? new Date(row.verified_at).toISOString() : (row.validated_at ? new Date(row.validated_at).toISOString() : null),
+    validatedBy: row.verified_by || row.validated_by || null,
     rewardUSD: Number(row.reward_usd ?? 0.04),
     rewardPaid: Boolean(row.reward_paid),
+    rewardPaidAt: row.reward_paid_at ? new Date(row.reward_paid_at).toISOString() : null,
     accountCreated: Boolean(row.account_created),
-    notes: row.validation_reason || '',
+    notes: row.verification_reason || row.validation_reason || '',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
-    updatedAt: row.completed_at ? new Date(row.completed_at).toISOString() : new Date().toISOString(),
-    syncedToGoogleSheets: false,
+    updatedAt: row.completed_at ? new Date(row.completed_at).toISOString() : (row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString()),
+    syncedToGoogleSheets: Boolean(row.synced_to_sheets),
     taskType: row.task_type || 'Facebook'
   };
 }
 
 /**
- * Fetch all tasks from PostgreSQL (with optional filter)
+ * Fetch all tasks from PostgreSQL (with comprehensive status and method filters)
  */
 export async function getAllTasks(filterStatus?: string): Promise<TaskRecord[]> {
   try {
@@ -49,19 +112,37 @@ export async function getAllTasks(filterStatus?: string): Promise<TaskRecord[]> 
     const params: any[] = [];
 
     if (filterStatus && filterStatus !== 'all') {
-      if (filterStatus === 'pending') {
-        query += ` WHERE t.validation_status = 'pending' OR t.status = 'en attente' OR t.status = 'pending'`;
-      } else if (filterStatus === 'validated') {
-        query += ` WHERE t.validation_status = 'validated' OR t.status = 'compte créé' OR t.status = 'vérifié'`;
-      } else if (filterStatus === 'rejected') {
-        query += ` WHERE t.validation_status = 'rejected' OR t.status = 'annulé'`;
-      } else {
-        query += ` WHERE t.status = $1`;
-        params.push(filterStatus);
+      switch (filterStatus) {
+        case 'pending_verification':
+        case 'pending':
+          query += ` WHERE t.account_status = 'pending_verification' OR (t.account_status IS NULL AND (t.validation_status = 'pending' OR t.status = 'en attente' OR t.status = 'pending'))`;
+          break;
+        case 'verified':
+          query += ` WHERE t.account_status = 'verified' OR t.verification_status = 'verified' OR t.validation_status = 'validated'`;
+          break;
+        case 'suspended':
+          query += ` WHERE t.account_status = 'suspended' OR t.verification_status = 'rejected' OR t.validation_status = 'rejected'`;
+          break;
+        case 'bot_verified':
+          query += ` WHERE (t.verification_method = 'BOT' OR t.validated_by ILIKE '%bot%') AND (t.account_status = 'verified' OR t.verification_status = 'verified' OR t.validation_status = 'validated')`;
+          break;
+        case 'bot_rejected':
+          query += ` WHERE (t.verification_method = 'BOT' OR t.validated_by ILIKE '%bot%') AND (t.account_status = 'suspended' OR t.verification_status = 'rejected' OR t.validation_status = 'rejected')`;
+          break;
+        case 'admin_verified':
+          query += ` WHERE (t.verification_method = 'ADMIN' OR (t.verification_method != 'BOT' AND (t.validated_by IS NOT NULL AND t.validated_by NOT ILIKE '%bot%'))) AND (t.account_status = 'verified' OR t.verification_status = 'verified' OR t.validation_status = 'validated')`;
+          break;
+        case 'admin_rejected':
+          query += ` WHERE (t.verification_method = 'ADMIN' OR (t.verification_method != 'BOT' AND (t.validated_by IS NOT NULL AND t.validated_by NOT ILIKE '%bot%'))) AND (t.account_status = 'suspended' OR t.verification_status = 'rejected' OR t.validation_status = 'rejected')`;
+          break;
+        default:
+          query += ` WHERE t.status = $1 OR t.account_status = $1`;
+          params.push(filterStatus);
+          break;
       }
     }
 
-    query += ` ORDER BY t.id DESC LIMIT 300`;
+    query += ` ORDER BY t.id DESC LIMIT 500`;
 
     const result = await pool.query(query, params);
     return result.rows.map(mapDbTaskToRecord);
@@ -72,7 +153,8 @@ export async function getAllTasks(filterStatus?: string): Promise<TaskRecord[]> 
 }
 
 /**
- * Create a new task in PostgreSQL
+ * Create a new task in PostgreSQL.
+ * Newly created Facebook accounts start in "Pending Verification" state.
  */
 export async function createTask(data: {
   taskId?: string;
@@ -87,9 +169,9 @@ export async function createTask(data: {
   notes?: string;
   status?: string;
   rewardUSD?: number;
+  skipAutoCheck?: boolean;
 }): Promise<TaskRecord> {
   const taskId = data.taskId || `task-${Date.now()}`;
-  const status = data.status || 'pending';
   const rewardUSD = data.rewardUSD ?? 0.04;
 
   // Ensure user exists
@@ -111,6 +193,10 @@ export async function createTask(data: {
         telegram_user_id,
         task_type,
         status,
+        account_status,
+        verification_status,
+        verification_method,
+        verification_result,
         uid,
         first_name,
         last_name,
@@ -119,26 +205,42 @@ export async function createTask(data: {
         reward_usd,
         validation_status,
         validation_reason,
+        reward_paid,
         created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+      VALUES (
+        $1, $2, $3, $4, 'pending_verification', 'pending', 'NONE', 'PENDING',
+        $5, $6, $7, $8, $9, $10, 'pending', $11, FALSE, NOW()
+      )
       RETURNING *
       `,
       [
         taskId,
         data.telegramUserId,
         data.taskType || 'Facebook',
-        status,
+        'pending',
         data.uid,
         data.firstName || '',
         data.lastName || '',
         data.password || '',
         data.cookies || '',
         rewardUSD,
-        'pending',
-        data.notes || null
+        data.notes || 'En attente de vérification'
       ]
     );
+
+    // Initial account record
+    if (data.uid) {
+      await client.query(
+        `
+        INSERT INTO accounts (task_id, uid, first_name, last_name, account_status)
+        VALUES ($1, $2, $3, $4, 'pending_verification')
+        ON CONFLICT (task_id) DO UPDATE
+        SET account_status = 'pending_verification'
+        `,
+        [taskId, data.uid, data.firstName || '', data.lastName || '']
+      );
+    }
 
     await client.query('COMMIT');
 
@@ -147,14 +249,14 @@ export async function createTask(data: {
       telegram_username: data.telegramUsername
     });
 
-    // Async sync to Google Sheets
+    // Async sync to Google Sheets (row updated with Task ID)
     syncTaskToGoogleSheets(createdRecord).catch(() => {});
 
     // Audit log
     logAudit('create_task', data.telegramUserId, {
       taskId,
       uid: data.uid,
-      taskType: data.taskType
+      accountStatus: 'pending_verification'
     }).catch(() => {});
 
     return createdRecord;
@@ -168,19 +270,22 @@ export async function createTask(data: {
 }
 
 /**
- * Validate task (Admin action)
- * Marks task validated, credits user wallet, creates account record, records validation, logs audit.
+ * Validate task (Admin or Bot action)
+ * Marks account verified, task validated, credits user wallet atomically, creates account record, records validation, logs audit, and notifies user.
+ * 
+ * IMPORTANT: Strictly prevents duplicate validation and duplicate rewards using row-level locking.
  */
 export async function validateTask(
   taskId: string,
   validatorId: string = 'admin',
-  reason: string = 'Validé par administrateur'
+  reason: string = 'Compte validé',
+  method: VerificationMethod = 'ADMIN'
 ): Promise<TaskRecord> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 1. Fetch task
+    // 1. Fetch task with exclusive row-level lock
     const taskRes = await client.query(
       `SELECT * FROM tasks WHERE task_id = $1 OR id::text = $1 FOR UPDATE`,
       [taskId]
@@ -195,25 +300,39 @@ export async function validateTask(
     const reward = Number(task.reward_usd || 0.04);
     const tgUserId = task.telegram_user_id;
 
+    // RULE 4: Prevent duplicate validation & duplicate rewards!
+    if (task.reward_paid && task.account_status === 'verified') {
+      await client.query('COMMIT');
+      console.log(`ℹ️ Task ${actualTaskId} already verified and rewarded. Skipping duplicate credit.`);
+      return mapDbTaskToRecord(task);
+    }
+
     // 2. Update task record
     const updatedTaskRes = await client.query(
       `
       UPDATE tasks
       SET
+        account_status = 'verified',
+        verification_status = 'verified',
+        verification_method = $1,
+        verification_result = 'GREEN',
+        verification_reason = $2,
         status = 'compte créé',
         validation_status = 'validated',
-        validation_reason = $1,
+        validation_reason = $2,
         validated_at = NOW(),
-        validated_by = $2,
+        verified_at = NOW(),
+        validated_by = $3,
+        verified_by = $3,
         account_created = TRUE,
-        account_created_at = NOW(),
+        account_created_at = COALESCE(account_created_at, NOW()),
         reward_paid = TRUE,
         reward_paid_at = NOW(),
         completed_at = NOW()
-      WHERE task_id = $3
+      WHERE task_id = $4
       RETURNING *
       `,
-      [reason, validatorId, actualTaskId]
+      [method, reason, validatorId, actualTaskId]
     );
 
     // 3. Upsert account record
@@ -221,15 +340,15 @@ export async function validateTask(
       await client.query(
         `
         INSERT INTO accounts (task_id, uid, first_name, last_name, account_status, validated_at)
-        VALUES ($1, $2, $3, $4, 'active', NOW())
+        VALUES ($1, $2, $3, $4, 'verified', NOW())
         ON CONFLICT (task_id) DO UPDATE
-        SET account_status = 'active', validated_at = NOW()
+        SET account_status = 'verified', validated_at = NOW()
         `,
         [actualTaskId, task.uid, task.first_name, task.last_name]
       );
     }
 
-    // 4. Record task_validations
+    // 4. Record task_validations history
     await client.query(
       `
       INSERT INTO task_validations (task_id, validator_id, status, reason, validated_at)
@@ -238,9 +357,10 @@ export async function validateTask(
       [actualTaskId, validatorId, reason]
     );
 
-    // 5. Credit user's wallet if reward not already paid
+    let newBalance = 0;
+
+    // 5. Credit user's wallet with exclusive lock (anti-double-spend)
     if (!task.reward_paid && tgUserId) {
-      // Find user internal id
       const userRes = await client.query(
         `SELECT id FROM users WHERE telegram_user_id = $1`,
         [tgUserId]
@@ -262,7 +382,7 @@ export async function validateTask(
         );
 
         const currentBal = Number(walletRes.rows[0]?.balance || 0);
-        const newBal = currentBal + reward;
+        newBalance = currentBal + reward;
 
         await client.query(
           `
@@ -289,38 +409,43 @@ export async function validateTask(
             actualTaskId,
             reward,
             currentBal,
-            newBal,
-            `Validation tâche ${actualTaskId}`
+            newBalance,
+            `Rémunération tâche ${actualTaskId} (${method})`
           ]
         );
       }
+    } else if (tgUserId) {
+      // Reward already paid, fetch current balance
+      const wRes = await client.query(
+        `SELECT w.balance FROM wallets w JOIN users u ON u.id = w.user_id WHERE u.telegram_user_id = $1`,
+        [tgUserId]
+      );
+      newBalance = Number(wRes.rows[0]?.balance || 0);
     }
 
     await client.query('COMMIT');
 
     const updatedTask = mapDbTaskToRecord(updatedTaskRes.rows[0]);
 
-    // Send in-app notification to user
+    // Send user notification in their language
     if (tgUserId) {
-      pool.query(`SELECT id FROM users WHERE telegram_user_id = $1`, [tgUserId]).then(uRes => {
-        if (uRes.rows.length > 0) {
-          createNotification(
-            uRes.rows[0].id,
-            'Tâche validée ! 🎉',
-            `Félicitations ! Votre tâche ${actualTaskId} a été validée. Une rémunération de $${reward.toFixed(2)} USD a été créditée sur votre portefeuille.`,
-            'reward'
-          ).catch(() => {});
-        }
-      }).catch(() => {});
+      sendTelegramVerificationMessage(tgUserId, {
+        isAccepted: true,
+        isBot: method === 'BOT',
+        rewardUSD: reward,
+        currentBalance: newBalance,
+        reason
+      }).catch(err => console.warn('⚠️ Notification error on task validation:', err));
     }
 
-    // Sync to Google Sheets
+    // Sync to Google Sheets (row updated with task ID)
     syncTaskToGoogleSheets(updatedTask).catch(() => {});
 
     // Audit log
     logAudit('validate_task', validatorId, {
       taskId: actualTaskId,
       reward,
+      method,
       telegramUserId: tgUserId
     }).catch(() => {});
 
@@ -335,13 +460,14 @@ export async function validateTask(
 }
 
 /**
- * Reject task (Admin action)
- * Marks task rejected with reason, records in task_validations, logs audit, updates Google Sheets.
+ * Reject task (Admin or Bot action)
+ * Marks account suspended, task rejected, does NOT credit wallet, records validation history, logs audit, and notifies user.
  */
 export async function rejectTask(
   taskId: string,
   validatorId: string = 'admin',
-  reason: string = 'Rejeté par administrateur'
+  reason: string = 'Rejeté par administrateur',
+  method: VerificationMethod = 'ADMIN'
 ): Promise<TaskRecord> {
   const client = await pool.connect();
   try {
@@ -358,23 +484,44 @@ export async function rejectTask(
 
     const task = taskRes.rows[0];
     const actualTaskId = task.task_id;
+    const tgUserId = task.telegram_user_id;
 
     const updatedTaskRes = await client.query(
       `
       UPDATE tasks
       SET
-        status = 'annulé',
+        account_status = 'suspended',
+        verification_status = 'rejected',
+        verification_method = $1,
+        verification_result = 'RED',
+        verification_reason = $2,
+        status = 'compte suspendu',
         validation_status = 'rejected',
-        validation_reason = $1,
+        validation_reason = $2,
         validated_at = NOW(),
-        validated_by = $2,
+        verified_at = NOW(),
+        validated_by = $3,
+        verified_by = $3,
         reward_paid = FALSE,
         completed_at = NOW()
-      WHERE task_id = $3
+      WHERE task_id = $4
       RETURNING *
       `,
-      [reason, validatorId, actualTaskId]
+      [method, reason, validatorId, actualTaskId]
     );
+
+    // Upsert account record as suspended
+    if (task.uid) {
+      await client.query(
+        `
+        INSERT INTO accounts (task_id, uid, first_name, last_name, account_status, validated_at)
+        VALUES ($1, $2, $3, $4, 'suspended', NOW())
+        ON CONFLICT (task_id) DO UPDATE
+        SET account_status = 'suspended', validated_at = NOW()
+        `,
+        [actualTaskId, task.uid, task.first_name, task.last_name]
+      );
+    }
 
     // Record validation report
     await client.query(
@@ -385,30 +532,38 @@ export async function rejectTask(
       [actualTaskId, validatorId, reason]
     );
 
+    // Fetch user balance (unchanged)
+    let currentBal = 0;
+    if (tgUserId) {
+      const wRes = await client.query(
+        `SELECT w.balance FROM wallets w JOIN users u ON u.id = w.user_id WHERE u.telegram_user_id = $1`,
+        [tgUserId]
+      );
+      currentBal = Number(wRes.rows[0]?.balance || 0);
+    }
+
     await client.query('COMMIT');
 
     const updatedTask = mapDbTaskToRecord(updatedTaskRes.rows[0]);
 
-    // Send in-app notification to user
-    if (task.telegram_user_id) {
-      pool.query(`SELECT id FROM users WHERE telegram_user_id = $1`, [task.telegram_user_id]).then(uRes => {
-        if (uRes.rows.length > 0) {
-          createNotification(
-            uRes.rows[0].id,
-            'Tâche refusée ❌',
-            `Votre tâche ${actualTaskId} a été rejetée. Motif : ${reason}`,
-            'warning'
-          ).catch(() => {});
-        }
-      }).catch(() => {});
+    // Send user notification in their language
+    if (tgUserId) {
+      sendTelegramVerificationMessage(tgUserId, {
+        isAccepted: false,
+        isBot: method === 'BOT',
+        rewardUSD: 0,
+        currentBalance: currentBal,
+        reason
+      }).catch(err => console.warn('⚠️ Notification error on task rejection:', err));
     }
 
-    // Sync to Google Sheets
+    // Sync to Google Sheets (row updated with task ID)
     syncTaskToGoogleSheets(updatedTask).catch(() => {});
 
     // Audit log
     logAudit('reject_task', validatorId, {
       taskId: actualTaskId,
+      method,
       reason
     }).catch(() => {});
 
@@ -423,7 +578,51 @@ export async function rejectTask(
 }
 
 /**
- * Update task status (e.g. mark suspended or active)
+ * Perform automatic verification check for a Facebook account (Bot check)
+ * Sends the user's Facebook UID to the Facebook checking service/API.
+ * 
+ * Result interpretation:
+ * - GREEN / valid result → account automatically VERIFIED, reward credited
+ * - RED / invalid result → account automatically REJECTED/SUSPENDED, no reward
+ */
+export async function performBotAccountCheck(
+  taskId: string,
+  settings?: any
+): Promise<TaskRecord> {
+  const res = await pool.query(
+    `SELECT * FROM tasks WHERE task_id = $1 OR id::text = $1`,
+    [taskId]
+  );
+
+  if (res.rows.length === 0) {
+    throw new Error(`Tâche ${taskId} introuvable`);
+  }
+
+  const task = res.rows[0];
+  const actualTaskId = task.task_id;
+
+  // Run the Facebook checker
+  const checkResult = await checkFacebookUid(task.uid, settings);
+
+  if (checkResult.status === 'GREEN') {
+    return await validateTask(
+      actualTaskId,
+      'BOT',
+      checkResult.reason || 'Vérification automatique Bot réussie (GREEN)',
+      'BOT'
+    );
+  } else {
+    return await rejectTask(
+      actualTaskId,
+      'BOT',
+      checkResult.reason || 'Échec de la vérification automatique Facebook (RED)',
+      'BOT'
+    );
+  }
+}
+
+/**
+ * Update task status (e.g. manual status change)
  */
 export async function updateTaskStatus(
   taskId: string,
@@ -509,4 +708,3 @@ export async function getUserTasks(telegramUserId: string | number): Promise<Tas
     return [];
   }
 }
-

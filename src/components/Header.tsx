@@ -10,7 +10,9 @@ import {
   Terminal, 
   Activity,
   Download,
-  AlertTriangle
+  AlertTriangle,
+  DollarSign,
+  Users
 } from 'lucide-react';
 import { BotSettings, TaskRecord } from '../types';
 
@@ -41,8 +43,10 @@ export const Header: React.FC<HeaderProps> = ({
 
   const navItems = [
     { id: 'tasks', label: 'Tâches & Comptes', icon: Activity, badge: tasks.length },
-    { id: 'simulator', label: 'Simulateur Bot', icon: Bot, highlight: true },
+    { id: 'withdrawals', label: 'Retraits & Finances', icon: DollarSign, highlight: true },
+    { id: 'simulator', label: 'Simulateur Bot', icon: Bot },
     { id: 'analytics', label: 'Analytiques', icon: ShieldCheck },
+    { id: 'staff', label: 'Équipe & Rôles', icon: Users },
     { id: 'settings', label: 'Paramètres Bot', icon: Settings },
     { id: 'google-sheets', label: 'Google Sheets API', icon: FileSpreadsheet },
     { id: 'tutorial', label: 'Déploiement 0€', icon: BookOpen },

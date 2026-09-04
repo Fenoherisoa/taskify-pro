@@ -22,13 +22,19 @@ interface TaskDetailsModalProps {
   onClose: () => void;
   onUpdateTask: (taskId: string, updates: Partial<TaskRecord>) => void;
   onSyncSingle: (task: TaskRecord) => void;
+  onValidateTask?: (taskId: string) => Promise<void>;
+  onRejectTask?: (taskId: string, reason?: string) => Promise<void>;
+  onBotCheckTask?: (taskId: string) => Promise<void>;
 }
 
 export const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
   task,
   onClose,
   onUpdateTask,
-  onSyncSingle
+  onSyncSingle,
+  onValidateTask,
+  onRejectTask,
+  onBotCheckTask
 }) => {
   if (!task) return null;
 
@@ -36,6 +42,10 @@ export const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
   const [notes, setNotes] = useState(task.notes || '');
   const [status, setStatus] = useState<TaskStatus>(task.status);
   const [isSaved, setIsSaved] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [isBotChecking, setIsBotChecking] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [showRejectInput, setShowRejectInput] = useState(false);
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -93,42 +103,165 @@ export const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-5 text-sm">
-          {/* Status & Quick Toggle */}
-          <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-1.5 font-mono">
-                Statut du Compte
-              </label>
-              <div className="flex items-center gap-2.5">
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as TaskStatus)}
-                  className="bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500 font-mono transition-all"
-                >
-                  <option value="compte créé">✅ Compte Créé (Actif)</option>
-                  <option value="compte suspendu">⚠️ Compte Suspendu (Alerte)</option>
-                  <option value="vérifié">🛡️ Vérifié (Stable)</option>
-                  <option value="en attente">⏳ En Attente</option>
-                  <option value="annulé">❌ Annulé</option>
-                </select>
+          {/* 1. Account Verification & Financial Reward Card */}
+          <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 font-mono block">
+                  Workflow de Vérification du Compte
+                </span>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Statut du compte distinct du statut de tâche opérationnel.
+                </p>
+              </div>
 
-                <button
-                  onClick={() => onSyncSingle(task)}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition-all shadow-sm"
-                  title="Forcer l'envoi vers Google Sheets"
-                >
-                  <FileSpreadsheet className="h-3.5 w-3.5" />
-                  <span>Sync Sheets</span>
-                </button>
+              {/* Account Status Badge */}
+              <div>
+                {task.accountStatus === 'verified' || task.status === 'vérifié' ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                    Compte Vérifié (Verified)
+                  </span>
+                ) : task.accountStatus === 'suspended' || task.status === 'compte suspendu' ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                    <AlertOctagon className="h-3.5 w-3.5 text-rose-400" />
+                    Compte Suspendu (Suspended)
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    <Clock className="h-3.5 w-3.5 text-amber-400" />
+                    En Attente de Vérification (Pending)
+                  </span>
+                )}
               </div>
             </div>
 
-            <div className="text-left sm:text-right">
-              <span className="text-xs text-slate-500 block font-mono">Identifiant Telegram</span>
-              <span className="text-xs font-mono text-slate-300 font-bold">
-                {task.telegramUserId} (@{task.telegramUsername})
-              </span>
+            {/* Verification Metadata Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                <span className="text-[10px] text-slate-500 uppercase font-mono block">Statut Tâche</span>
+                <span className={`font-mono font-bold ${
+                  task.validationStatus === 'validated' ? 'text-emerald-400' :
+                  task.validationStatus === 'rejected' ? 'text-rose-400' : 'text-amber-400'
+                }`}>
+                  {task.validationStatus === 'validated' ? 'VALIDATED' :
+                   task.validationStatus === 'rejected' ? 'REJECTED' : 'PENDING'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                <span className="text-[10px] text-slate-500 uppercase font-mono block">Méthode</span>
+                <span className="font-mono font-bold text-slate-200">
+                  {task.verificationMethod || 'AUCUNE'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                <span className="text-[10px] text-slate-500 uppercase font-mono block">Résultat Check</span>
+                <span className={`font-mono font-bold ${
+                  task.verificationResult === 'GREEN' ? 'text-emerald-400' :
+                  task.verificationResult === 'RED' ? 'text-rose-400' : 'text-slate-400'
+                }`}>
+                  {task.verificationResult || 'NON DÉFINI'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                <span className="text-[10px] text-slate-500 uppercase font-mono block">Rémunération</span>
+                <span className={`font-mono font-bold ${task.rewardPaid ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  {task.rewardPaid ? '+$0.040 USD Payé' : '$0.00 USD'}
+                </span>
+              </div>
             </div>
+
+            {task.validationReason && (
+              <div className="p-2.5 rounded-xl bg-rose-950/20 border border-rose-500/30 text-xs text-rose-300">
+                <span className="font-bold font-mono text-[10px] uppercase block text-rose-400">Motif de rejet / suspension :</span>
+                {task.validationReason}
+              </div>
+            )}
+
+            {/* Action Buttons: Admin Validation, Admin Rejection, Auto Bot Check */}
+            <div className="pt-2 flex flex-wrap items-center gap-2.5">
+              {onValidateTask && (
+                <button
+                  onClick={async () => {
+                    setIsValidating(true);
+                    try {
+                      await onValidateTask(task.id);
+                    } finally {
+                      setIsValidating(false);
+                    }
+                  }}
+                  disabled={isValidating || task.accountStatus === 'verified'}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/25 disabled:opacity-40"
+                  title="Accepter l'account : statut = VERIFIED, tâche = VALIDATED, rémunération créditée"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{isValidating ? 'Validation...' : 'Valider Compte (+$0.04)'}</span>
+                </button>
+              )}
+
+              {onRejectTask && (
+                <button
+                  onClick={() => setShowRejectInput(!showRejectInput)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-bold transition-all"
+                  title="Rejeter l'account : statut = SUSPENDED, tâche = REJECTED, 0$"
+                >
+                  <AlertOctagon className="w-4 h-4" />
+                  <span>Rejeter / Suspendre</span>
+                </button>
+              )}
+
+              {onBotCheckTask && (
+                <button
+                  onClick={async () => {
+                    setIsBotChecking(true);
+                    try {
+                      await onBotCheckTask(task.id);
+                    } finally {
+                      setIsBotChecking(false);
+                    }
+                  }}
+                  disabled={isBotChecking}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-bold transition-all disabled:opacity-50"
+                  title="Lancer l'interrogation automatique de l'API Facebook UID Checker"
+                >
+                  <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                  <span>{isBotChecking ? 'Vérification UID...' : 'Bot Check Automatique'}</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => onSyncSingle(task)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-bold transition-all ml-auto"
+                title="Forcer l'envoi vers Google Sheets"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-400" />
+                <span>Sync Sheets</span>
+              </button>
+            </div>
+
+            {showRejectInput && onRejectTask && (
+              <div className="pt-3 border-t border-slate-800 flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Motif du rejet / suspension (ex: UID Facebook invalide, compte bloqué...)"
+                  value={rejectReason}
+                  onChange={e => setRejectReason(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
+                />
+                <button
+                  onClick={async () => {
+                    await onRejectTask(task.id, rejectReason || 'Non conforme');
+                    setShowRejectInput(false);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all"
+                >
+                  Confirmer Suspension
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Credentials Card */}

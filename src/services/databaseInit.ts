@@ -547,6 +547,50 @@ export async function initializeDatabase() {
 
       ALTER TABLE tasks
         ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+      ALTER TABLE tasks
+        ADD COLUMN IF NOT EXISTS account_status TEXT
+        DEFAULT 'pending_verification';
+
+      ALTER TABLE tasks
+        ADD COLUMN IF NOT EXISTS verification_status TEXT
+        DEFAULT 'pending';
+
+      ALTER TABLE tasks
+        ADD COLUMN IF NOT EXISTS verification_method TEXT
+        DEFAULT 'NONE';
+
+      ALTER TABLE tasks
+        ADD COLUMN IF NOT EXISTS verification_result TEXT
+        DEFAULT 'PENDING';
+
+      ALTER TABLE tasks
+        ADD COLUMN IF NOT EXISTS verification_reason TEXT;
+
+      ALTER TABLE tasks
+        ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+
+      ALTER TABLE tasks
+        ADD COLUMN IF NOT EXISTS verified_by TEXT;
+    `);
+
+    // Safe backfill of account_status and verification_status for existing tasks
+    await pool.query(`
+      UPDATE tasks
+      SET account_status = CASE
+        WHEN validation_status = 'validated' OR status = 'compte créé' OR status = 'vérifié' THEN 'verified'
+        WHEN validation_status = 'rejected' OR status = 'compte suspendu' OR status = 'annulé' THEN 'suspended'
+        ELSE 'pending_verification'
+      END
+      WHERE account_status IS NULL OR account_status = '';
+
+      UPDATE tasks
+      SET verification_status = CASE
+        WHEN validation_status = 'validated' OR status = 'compte créé' OR status = 'vérifié' THEN 'verified'
+        WHEN validation_status = 'rejected' OR status = 'compte suspendu' OR status = 'annulé' THEN 'rejected'
+        ELSE 'pending'
+      END
+      WHERE verification_status IS NULL OR verification_status = '';
     `);
 
     // ========================================================

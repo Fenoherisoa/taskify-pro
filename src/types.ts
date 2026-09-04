@@ -1,5 +1,10 @@
 export type TaskStatus = 'compte créé' | 'compte suspendu' | 'en attente' | 'vérifié' | 'annulé' | 'pending';
 
+export type AccountStatus = 'pending_verification' | 'verified' | 'suspended';
+export type VerificationStatus = 'pending' | 'verified' | 'rejected';
+export type VerificationMethod = 'ADMIN' | 'BOT' | 'NONE';
+export type VerificationResult = 'GREEN' | 'RED' | 'PENDING';
+
 export interface TaskRecord {
   id: string;
   uid: string;
@@ -10,12 +15,17 @@ export interface TaskRecord {
   telegramUserId: string;
   telegramUsername: string;
   status: TaskStatus;
+  accountStatus?: AccountStatus;
+  verificationStatus?: VerificationStatus;
+  verificationMethod?: VerificationMethod;
+  verificationResult?: VerificationResult;
   validationStatus?: 'pending' | 'validated' | 'rejected';
   validationReason?: string | null;
   validatedAt?: string | null;
   validatedBy?: string | null;
   rewardUSD?: number;
   rewardPaid?: boolean;
+  rewardPaidAt?: string | null;
   accountCreated?: boolean;
   notes?: string;
   createdAt: string;
@@ -143,6 +153,9 @@ export interface BotSettings {
   webhookUrl?: string;
   lastSyncedAt?: string | null;
   welcomeMessage?: string;
+  facebookCheckerApiUrl?: string;
+  facebookCheckerApiKey?: string;
+  autoBotCheckEnabled?: boolean;
 }
 
 export interface BotLog {

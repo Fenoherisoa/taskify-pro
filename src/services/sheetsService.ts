@@ -13,7 +13,12 @@ export interface SheetTaskPayload {
   id: string;
   uid: string;
   status: string;
-  validationStatus?: string;
+  accountStatus?: string;
+  verificationStatus?: string;
+  verificationMethod?: string;
+  verificationResult?: string;
+  verificationReason?: string | null;
+  rewardPaid?: boolean;
   firstName?: string;
   lastName?: string;
   password?: string;
@@ -43,11 +48,16 @@ export async function syncTaskToGoogleSheets(
   }
 
   const payload = {
-    action: 'sync_task', // Updates existing row if found, appends if new
+    action: 'sync_task', // Updates existing row if found by Task ID, appends if new
     timestamp: task.timestamp || new Date().toISOString(),
     id: task.id || '',
     status: task.status || 'pending',
-    validationStatus: task.validationStatus || 'pending',
+    accountStatus: task.accountStatus || 'pending_verification',
+    verificationStatus: task.verificationStatus || 'pending',
+    verificationMethod: task.verificationMethod || 'NONE',
+    verificationResult: task.verificationResult || 'PENDING',
+    verificationReason: task.verificationReason || '',
+    rewardPaid: Boolean(task.rewardPaid),
     uid: task.uid || '',
     firstName: task.firstName || '',
     lastName: task.lastName || '',
@@ -55,7 +65,7 @@ export async function syncTaskToGoogleSheets(
     cookies: task.cookies || '',
     telegramUserId: task.telegramUserId || '',
     telegramUsername: task.telegramUsername || '',
-    notes: task.notes || '',
+    notes: task.notes || task.verificationReason || '',
     taskType: task.taskType || 'Facebook',
     rewardUSD: task.rewardUSD ?? 0.04,
     // Backward-compatible nested data object:
@@ -63,6 +73,12 @@ export async function syncTaskToGoogleSheets(
       timestamp: task.timestamp || new Date().toISOString(),
       id: task.id || '',
       status: task.status || 'pending',
+      accountStatus: task.accountStatus || 'pending_verification',
+      verificationStatus: task.verificationStatus || 'pending',
+      verificationMethod: task.verificationMethod || 'NONE',
+      verificationResult: task.verificationResult || 'PENDING',
+      verificationReason: task.verificationReason || '',
+      rewardPaid: Boolean(task.rewardPaid),
       uid: task.uid || '',
       firstName: task.firstName || '',
       lastName: task.lastName || '',
@@ -70,7 +86,7 @@ export async function syncTaskToGoogleSheets(
       cookies: task.cookies || '',
       telegramUserId: task.telegramUserId || '',
       telegramUsername: task.telegramUsername || '',
-      notes: task.notes || '',
+      notes: task.notes || task.verificationReason || '',
       taskType: task.taskType || 'Facebook',
       rewardUSD: task.rewardUSD ?? 0.04
     }

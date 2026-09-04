@@ -24,6 +24,8 @@ interface TasksTableProps {
   onDeleteTask: (taskId: string) => void;
   selectedFilter: string;
   onFilterChange: (status: string) => void;
+  onValidateTask?: (taskId: string) => Promise<void>;
+  onBotCheckTask?: (taskId: string) => Promise<void>;
 }
 
 export const TasksTable: React.FC<TasksTableProps> = ({
@@ -32,10 +34,13 @@ export const TasksTable: React.FC<TasksTableProps> = ({
   onUpdateStatus,
   onDeleteTask,
   selectedFilter,
-  onFilterChange
+  onFilterChange,
+  onValidateTask,
+  onBotCheckTask
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [busyTasks, setBusyTasks] = useState<Record<string, boolean>>({});
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -44,7 +49,19 @@ export const TasksTable: React.FC<TasksTableProps> = ({
   };
 
   const filteredTasks = tasks.filter(task => {
-    const matchesFilter = selectedFilter === 'all' || task.status === selectedFilter;
+    let matchesFilter = true;
+    if (selectedFilter === 'all') {
+      matchesFilter = true;
+    } else if (selectedFilter === 'pending_verification') {
+      matchesFilter = task.accountStatus === 'pending_verification' || (!task.accountStatus && (task.status === 'compte créé' || task.status === 'en attente'));
+    } else if (selectedFilter === 'verified') {
+      matchesFilter = task.accountStatus === 'verified' || task.status === 'vérifié';
+    } else if (selectedFilter === 'suspended') {
+      matchesFilter = task.accountStatus === 'suspended' || task.status === 'compte suspendu';
+    } else {
+      matchesFilter = task.status === selectedFilter;
+    }
+
     const q = searchQuery.toLowerCase();
     const matchesSearch = 
       task.uid.toLowerCase().includes(q) ||
@@ -83,39 +100,63 @@ export const TasksTable: React.FC<TasksTableProps> = ({
     document.body.removeChild(link);
   };
 
+  const getAccountStatusBadge = (task: TaskRecord) => {
+    const isVerified = task.accountStatus === 'verified' || task.status === 'vérifié';
+    const isSuspended = task.accountStatus === 'suspended' || task.status === 'compte suspendu';
+
+    if (isVerified) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+          <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+          Vérifié (Verified)
+        </span>
+      );
+    }
+    if (isSuspended) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+          <AlertOctagon className="h-3 w-3 text-rose-400" />
+          Suspendu (Suspended)
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+        <Clock className="h-3 w-3 text-amber-400" />
+        En Attente (Pending)
+      </span>
+    );
+  };
+
   const getStatusBadge = (status: TaskStatus) => {
     switch (status) {
       case 'compte créé':
         return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-            Compte créé
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+            Tâche : Créée
           </span>
         );
       case 'compte suspendu':
         return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
-            <AlertOctagon className="h-3.5 w-3.5 text-rose-400" />
-            Compte suspendu
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+            Tâche : Rejetée
           </span>
         );
       case 'vérifié':
         return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
-            <ShieldCheck className="h-3.5 w-3.5 text-indigo-400" />
-            Vérifié
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+            Tâche : Validée
           </span>
         );
       case 'en attente':
         return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-            <Clock className="h-3.5 w-3.5 text-amber-400" />
-            En attente
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+            Tâche : En attente
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
             {status}
           </span>
         );
@@ -148,38 +189,38 @@ export const TasksTable: React.FC<TasksTableProps> = ({
 
         {/* Filter Pills & Export */}
         <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-          <div className="flex bg-slate-950/80 p-1 rounded-xl border border-slate-800 text-xs">
+          <div className="flex bg-slate-950/80 p-1 rounded-xl border border-slate-800 text-xs flex-wrap">
             <button
               onClick={() => onFilterChange('all')}
-              className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all ${
+              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
                 selectedFilter === 'all' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               Tous ({tasks.length})
             </button>
             <button
-              onClick={() => onFilterChange('compte créé')}
-              className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all ${
-                selectedFilter === 'compte créé' ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/30' : 'text-slate-400 hover:text-slate-200'
+              onClick={() => onFilterChange('pending_verification')}
+              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                selectedFilter === 'pending_verification' ? 'bg-amber-600/30 text-amber-300 border border-amber-500/30' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Créés
+              En Attente ({tasks.filter(t => t.accountStatus === 'pending_verification' || (!t.accountStatus && t.status !== 'vérifié' && t.status !== 'compte suspendu')).length})
             </button>
             <button
-              onClick={() => onFilterChange('compte suspendu')}
-              className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all ${
-                selectedFilter === 'compte suspendu' ? 'bg-rose-600/30 text-rose-300 border border-rose-500/30' : 'text-slate-400 hover:text-slate-200'
+              onClick={() => onFilterChange('verified')}
+              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                selectedFilter === 'verified' ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/30' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Suspendus
+              Vérifiés ({tasks.filter(t => t.accountStatus === 'verified' || t.status === 'vérifié').length})
             </button>
             <button
-              onClick={() => onFilterChange('vérifié')}
-              className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all hidden sm:block ${
-                selectedFilter === 'vérifié' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/30' : 'text-slate-400 hover:text-slate-200'
+              onClick={() => onFilterChange('suspended')}
+              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                selectedFilter === 'suspended' ? 'bg-rose-600/30 text-rose-300 border border-rose-500/30' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Vérifiés
+              Suspendus ({tasks.filter(t => t.accountStatus === 'suspended' || t.status === 'compte suspendu').length})
             </button>
           </div>
 
@@ -254,6 +295,16 @@ export const TasksTable: React.FC<TasksTableProps> = ({
                           <FileSpreadsheet className="h-2.5 w-2.5" /> Sheets OK
                         </span>
                       )}
+                      {task.validationStatus === 'validated' && (
+                        <div className="inline-flex items-center gap-1 text-[10px] text-emerald-300 font-mono font-bold mt-1 bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                          ✓ Rémunéré ($0.04)
+                        </div>
+                      )}
+                      {task.validationStatus === 'rejected' && (
+                        <div className="inline-flex items-center gap-1 text-[10px] text-rose-300 font-mono font-bold mt-1 bg-rose-500/15 px-1.5 py-0.5 rounded border border-rose-500/30">
+                          ✗ Rejeté
+                        </div>
+                      )}
                     </td>
 
                     {/* 2. UID Facebook */}
@@ -324,39 +375,28 @@ export const TasksTable: React.FC<TasksTableProps> = ({
                       </div>
                     </td>
 
-                    {/* 6. Status & Quick Toggle */}
+                    {/* 6. Account Verification & Task Status */}
                     <td className="py-4 px-4 sm:px-6 text-center whitespace-nowrap">
                       <div className="inline-flex flex-col items-center gap-1.5">
-                        {getStatusBadge(task.status)}
-                        
-                        {/* Quick Switch Actions */}
+                        {getAccountStatusBadge(task)}
+
+                        {/* Verification Method & Result Pill */}
+                        {task.verificationMethod && (
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                            task.verificationResult === 'GREEN' || task.validationStatus === 'validated'
+                              ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                              : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+                          }`}>
+                            {task.verificationMethod}: {task.verificationResult || (task.validationStatus === 'validated' ? 'GREEN' : 'RED')}
+                          </span>
+                        )}
+
                         <div className="flex items-center gap-1">
-                          {task.status !== 'compte suspendu' ? (
-                            <button
-                              onClick={() => onUpdateStatus(task.id, 'compte suspendu')}
-                              className="text-[10px] px-2 py-0.5 rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 transition-all font-mono font-medium"
-                              title="Signaler comme suspendu"
-                            >
-                              + Suspendu
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => onUpdateStatus(task.id, 'compte créé')}
-                              className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 transition-all font-mono font-medium"
-                              title="Rétablir en Compte Créé"
-                            >
-                              ✓ Réactiver
-                            </button>
-                          )}
-                          
-                          {task.status !== 'vérifié' && (
-                            <button
-                              onClick={() => onUpdateStatus(task.id, 'vérifié')}
-                              className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 transition-all font-mono font-medium"
-                              title="Marquer comme vérifié"
-                            >
-                              Vérifier
-                            </button>
+                          {getStatusBadge(task.status)}
+                          {task.rewardPaid && (
+                            <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                              +$0.04
+                            </span>
                           )}
                         </div>
                       </div>
@@ -365,6 +405,44 @@ export const TasksTable: React.FC<TasksTableProps> = ({
                     {/* 7. Action Buttons */}
                     <td className="py-4 px-4 sm:px-6 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1.5">
+                        {/* Quick Bot Check */}
+                        {onBotCheckTask && (
+                          <button
+                            onClick={async () => {
+                              setBusyTasks(prev => ({ ...prev, [task.id]: true }));
+                              try {
+                                await onBotCheckTask(task.id);
+                              } finally {
+                                setBusyTasks(prev => ({ ...prev, [task.id]: false }));
+                              }
+                            }}
+                            disabled={busyTasks[task.id]}
+                            className="p-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 transition-all shadow-sm disabled:opacity-50"
+                            title="Lancer le Bot Check automatique"
+                          >
+                            <ShieldCheck className={`h-4 w-4 ${busyTasks[task.id] ? 'animate-spin' : ''}`} />
+                          </button>
+                        )}
+
+                        {/* Quick Validate */}
+                        {onValidateTask && task.accountStatus !== 'verified' && (
+                          <button
+                            onClick={async () => {
+                              setBusyTasks(prev => ({ ...prev, [task.id]: true }));
+                              try {
+                                await onValidateTask(task.id);
+                              } finally {
+                                setBusyTasks(prev => ({ ...prev, [task.id]: false }));
+                              }
+                            }}
+                            disabled={busyTasks[task.id]}
+                            className="p-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 transition-all shadow-sm disabled:opacity-50"
+                            title="Valider le compte (+0.04$)"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                          </button>
+                        )}
+
                         <button
                           onClick={() => onSelectTask(task)}
                           className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-all shadow-sm"

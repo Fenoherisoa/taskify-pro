@@ -11,6 +11,8 @@ import { GoogleAppsScriptView } from './components/GoogleAppsScriptView';
 import { DeploymentTutorialView } from './components/DeploymentTutorialView';
 import { LiveLogsView } from './components/LiveLogsView';
 import { ExportModal } from './components/ExportModal';
+import { WithdrawalsView } from './components/WithdrawalsView';
+import { StaffView } from './components/StaffView';
 import TelegramMiniApp from './components/TelegramMiniApp';
 import { TaskRecord, BotSettings, BotLog, TaskStatus } from './types';
 import { 
@@ -22,7 +24,10 @@ import {
   deleteTask, 
   createTask, 
   saveSettings, 
-  sendToGoogleSheetsWebhook 
+  sendToGoogleSheetsWebhook,
+  validateTaskApi,
+  rejectTaskApi,
+  runBotCheckApi
 } from './services/apiService';
 
 export default function App() {
@@ -98,6 +103,61 @@ export default function App() {
     const updated = await deleteTask(taskId);
     setTasks(updated);
     if (selectedTask?.id === taskId) setSelectedTask(null);
+  };
+
+  const handleValidateTask = async (taskId: string) => {
+    try {
+      const res = await validateTaskApi(taskId, 'admin_dashboard', 'Validation manuelle');
+      if (res.success) {
+        alert('✅ Tâche validée avec succès ! $0.040 USD crédités sur le portefeuille de l\'utilisateur.');
+        await loadData();
+        if (selectedTask?.id === taskId) {
+          setSelectedTask(prev => prev ? { ...prev, validationStatus: 'validated', status: 'vérifié' } : null);
+        }
+      } else {
+        alert(`Erreur : ${res.message || 'Impossible de valider la tâche.'}`);
+      }
+    } catch (err: any) {
+      alert(`Erreur de validation : ${err.message}`);
+    }
+  };
+
+  const handleRejectTask = async (taskId: string, reason?: string) => {
+    try {
+      const res = await rejectTaskApi(taskId, 'admin_dashboard', reason || 'Non conforme');
+      if (res.success) {
+        alert('Tâche rejetée.');
+        await loadData();
+        if (selectedTask?.id === taskId) {
+          setSelectedTask(prev => prev ? { ...prev, validationStatus: 'rejected', validationReason: reason } : null);
+        }
+      } else {
+        alert(`Erreur : ${res.message || 'Impossible de rejeter la tâche.'}`);
+      }
+    } catch (err: any) {
+      alert(`Erreur : ${err.message}`);
+    }
+  };
+
+  const handleBotCheckTask = async (taskId: string) => {
+    try {
+      const res = await runBotCheckApi(taskId);
+      if (res.success && res.task) {
+        const isVerif = res.task.accountStatus === 'verified' || res.task.status === 'vérifié';
+        const msg = isVerif
+          ? 'Compte VÉRIFIÉ (UID Facebook Valide / GREEN) ! Récompense de 0.040 USD créditée au portefeuille.'
+          : `Compte SUSPENDU (UID Facebook Invalide / RED) : ${res.task.validationReason || 'Rejeté'}`;
+        alert(msg);
+        await loadData();
+        if (selectedTask?.id === taskId) {
+          setSelectedTask(res.task);
+        }
+      } else {
+        alert(`Erreur lors du Bot Check : ${res.message || 'Échec de la vérification'}`);
+      }
+    } catch (err: any) {
+      alert(`Erreur Bot Check : ${err.message}`);
+    }
   };
 
   const handleCreateTask = async (taskData: any) => {
@@ -253,11 +313,20 @@ export default function App() {
               onDeleteTask={handleDeleteTask}
               selectedFilter={selectedFilter}
               onFilterChange={setSelectedFilter}
+              onValidateTask={handleValidateTask}
+              onBotCheckTask={handleBotCheckTask}
             />
           </div>
         )}
 
-        {/* Tab 2: Interactive Telegram Bot Simulator */}
+        {/* Tab 2: Withdrawals & Financial Management */}
+        {activeTab === 'withdrawals' && (
+          <div className="animate-in fade-in duration-200">
+            <WithdrawalsView onRefreshStats={loadData} />
+          </div>
+        )}
+
+        {/* Tab 3: Interactive Telegram Bot Simulator */}
         {activeTab === 'simulator' && (
           <div className="animate-in fade-in duration-200" data-tab="simulator">
             <BotSimulator
@@ -270,14 +339,21 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 3: Analytics & Visual Tracking */}
+        {/* Tab 4: Analytics & Visual Tracking */}
         {activeTab === 'analytics' && (
           <div className="animate-in fade-in duration-200">
             <AnalyticsView tasks={tasks} />
           </div>
         )}
 
-        {/* Tab 4: Bot Settings */}
+        {/* Tab 5: Staff & RBAC Team Management */}
+        {activeTab === 'staff' && (
+          <div className="animate-in fade-in duration-200">
+            <StaffView />
+          </div>
+        )}
+
+        {/* Tab 6: Bot Settings */}
         {activeTab === 'settings' && (
           <div className="animate-in fade-in duration-200">
             <BotSettingsView
@@ -288,21 +364,21 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 5: Google Apps Script Backend Code */}
+        {/* Tab 7: Google Apps Script Backend Code */}
         {activeTab === 'google-sheets' && (
           <div className="animate-in fade-in duration-200">
             <GoogleAppsScriptView />
           </div>
         )}
 
-        {/* Tab 6: Free 0€ Deployment Tutorial */}
+        {/* Tab 8: Free 0€ Deployment Tutorial */}
         {activeTab === 'tutorial' && (
           <div className="animate-in fade-in duration-200">
             <DeploymentTutorialView />
           </div>
         )}
 
-        {/* Tab 7: Real-time Live Logs */}
+        {/* Tab 9: Real-time Live Logs */}
         {activeTab === 'logs' && (
           <div className="animate-in fade-in duration-200">
             <LiveLogsView logs={logs} onRefresh={loadData} />
@@ -323,6 +399,9 @@ export default function App() {
         task={selectedTask}
         onClose={() => setSelectedTask(null)}
         onUpdateTask={handleUpdateTask}
+        onValidateTask={handleValidateTask}
+        onRejectTask={handleRejectTask}
+        onBotCheckTask={handleBotCheckTask}
         onSyncSingle={async (task) => {
           await fetch('/api/test-google-sheets', {
             method: 'POST',

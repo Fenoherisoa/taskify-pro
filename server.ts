@@ -9,7 +9,8 @@ import {
   getUserWallet,
   getUserProfile,
   setUserLanguage,
-  getUserStats
+  getUserStats,
+  getAllWallets
 } from './src/services/userService';
 import {
   getAllTasks,
@@ -17,15 +18,26 @@ import {
   validateTask,
   rejectTask,
   updateTaskStatus,
-  deleteTask
+  deleteTask,
+  performBotAccountCheck
 } from './src/services/taskService';
 import {
   requestWithdrawal,
   getAllWithdrawals,
-  processWithdrawal
+  processWithdrawal,
+  getAllTransactions
 } from './src/services/withdrawalService';
+import {
+  getAllStaff,
+  createStaffMember,
+  updateStaffMember,
+  loginStaff,
+  verifySession,
+  logoutStaff
+} from './src/services/authService';
 import { getAuditLogs, logAudit } from './src/services/auditService';
 import { syncTaskToGoogleSheets } from './src/services/sheetsService';
+import { checkFacebookUid } from './src/services/facebookCheckerService';
 import { INITIAL_TASKS } from './src/data/mockTasks';
 import crypto from 'crypto';
 
@@ -568,10 +580,11 @@ app.post('/api/tasks/:taskId/validate', async (req, res) => {
     const { taskId } = req.params;
     const {
       validatorId = 'admin',
-      notes = 'Validé avec succès'
+      notes = 'Validé avec succès',
+      reason
     } = req.body;
 
-    const validated = await validateTask(taskId, validatorId, notes);
+    const validated = await validateTask(taskId, validatorId, reason || notes, 'ADMIN');
     return res.json({
       success: true,
       validated: true,
@@ -583,6 +596,23 @@ app.post('/api/tasks/:taskId/validate', async (req, res) => {
     return res.status(400).json({
       success: false,
       message: error.message || 'Erreur lors de la validation'
+    });
+  }
+});
+
+app.post('/api/tasks/:taskId/bot-check', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const result = await performBotAccountCheck(taskId, botSettings);
+    return res.json({
+      success: true,
+      task: result
+    });
+  } catch (error: any) {
+    console.error('❌ Bot check error:', error.message);
+    return res.status(400).json({
+      success: false,
+      message: error.message || 'Erreur lors de la vérification par le bot'
     });
   }
 });
@@ -733,7 +763,10 @@ let botSettings = {
   mode: 'polling' as 'polling' | 'webhook',
   webhookUrl: process.env.WEBHOOK_URL || '',
   lastSyncedAt: new Date().toISOString(),
-  welcomeMessage: "Bienvenue sur Taskify Pro (@TaskifyProBot) - Gestionnaire de tâches automatisées."
+  welcomeMessage: "Bienvenue sur Taskify Pro (@TaskifyProBot) - Gestionnaire de tâches automatisées.",
+  facebookCheckerApiUrl: process.env.FACEBOOK_CHECKER_API_URL || '',
+  facebookCheckerApiKey: process.env.FACEBOOK_CHECKER_API_KEY || '',
+  autoBotCheckEnabled: true
 };
 
 let tasks: any[] = [...INITIAL_TASKS];
@@ -1945,236 +1978,73 @@ function setupTelegrafHandlers(bot: Telegraf) {
     if (session.step === 'AWAITING_COOKIES') {
       session.cookies = text;
 
-      const createdTask = {
-        id: `task-${Date.now()}`,
-        uid: session.uid || '1000' + Math.floor(Math.random() * 90000000000),
-        cookies: session.cookies,
-        firstName: session.firstName || 'Alexandre',
-        lastName: session.lastName || 'Dubois',
-        password: session.password || botSettings.customPassword,
-        telegramUserId: userId,
-        telegramUsername: username,
-        status: 'compte créé' as const,
-        notes: `Enregistré via ${botSettings.platformName} (@TaskifyProBot)`,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        syncedToGoogleSheets: false,
-        taskType: session.taskType || 'Facebook'
-      };
-
-      tasks.unshift(createdTask);
-      addLog('success', 'telegram', `🎉 Tâche reçue via Bot Telegram (UID: ${createdTask.uid})`, createdTask);
-
-      // Async sync to Google Sheets
-      if (botSettings.googleSheetWebhookUrl) {
-        syncRowToGoogleSheets(createdTask).then(() => {
-          createdTask.syncedToGoogleSheets = true;
-        }).catch(() => {});
-      }
-
-      // -----------------------------------------------
-      // PERSISTENT LEDGER - PostgreSQL
-      // -----------------------------------------------
-
-      const client = await pool.connect();
-
-      let currentBal = 0;
-
-      try {
-        await client.query('BEGIN');
-
-        // 1. Créer ou récupérer le worker
-        const userResult = await client.query(
-          `
-          INSERT INTO users (
-            telegram_user_id,
-            telegram_username,
-            first_name,
-            last_name
-          )
-          VALUES ($1, $2, $3, $4)
-          ON CONFLICT (telegram_user_id)
-          DO UPDATE SET
-            telegram_username = EXCLUDED.telegram_username,
-            first_name = EXCLUDED.first_name,
-            last_name = EXCLUDED.last_name,
-            updated_at = NOW()
-          RETURNING id
-          `,
-          [
-            String(userId),
-            username || null,
-            createdTask.firstName || null,
-            createdTask.lastName || null
-          ]
-        );
-
-        const dbUserId = userResult.rows[0].id;
-
-        // 2. Créer le wallet s'il n'existe pas
-        await client.query(
-          `
-          INSERT INTO wallets (
-            user_id,
-            balance,
-            total_earned,
-            total_withdrawn
-          )
-          VALUES ($1, 0, 0, 0)
-          ON CONFLICT (user_id) DO NOTHING
-          `,
-          [dbUserId]
-        );
-
-        // 3. Enregistrer la tâche dans PostgreSQL
-        await client.query(
-          `
-          INSERT INTO tasks (
-            task_id,
-            telegram_user_id,
-            task_type,
-            status,
-            uid,
-            first_name,
-            last_name,
-            password,
-            cookies,
-            reward_usd,
-            created_at,
-            completed_at
-          )
-          VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9,
-            $10, $11, NOW()
-          )
-          ON CONFLICT (task_id) DO NOTHING
-          `,
-          [
-            createdTask.id,
-            String(userId),
-            createdTask.taskType,
-            createdTask.status,
-            createdTask.uid,
-            createdTask.firstName,
-            createdTask.lastName,
-            createdTask.password,
-            createdTask.cookies,
-            TASK_REWARD_USD,
-            createdTask.createdAt
-          ]
-        );
-
-        // 4. Récupérer le solde actuel avec verrouillage
-        const walletResult = await client.query(
-          `
-          SELECT balance
-          FROM wallets
-          WHERE user_id = $1
-          FOR UPDATE
-          `,
-          [dbUserId]
-        );
-
-        if (walletResult.rows.length === 0) {
-          throw new Error(
-            `Wallet introuvable pour l'utilisateur ${userId}`
-          );
-        }
-
-        const balanceBefore = Number(
-          walletResult.rows[0].balance
-        );
-
-        currentBal =
-          balanceBefore + TASK_REWARD_USD;
-
-        // 5. Créditer le reward
-        await client.query(
-          `
-          UPDATE wallets
-          SET
-            balance = $1,
-            total_earned = total_earned + $2,
-            updated_at = NOW()
-          WHERE user_id = $3
-          `,
-          [
-            currentBal,
-            TASK_REWARD_USD,
-            dbUserId
-          ]
-        );
-
-        // 6. Enregistrer la transaction
-        await client.query(
-          `
-          INSERT INTO transactions (
-            user_id,
-            task_id,
-            type,
-            amount,
-            balance_before,
-            balance_after,
-            description
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-          `,
-          [
-            dbUserId,
-            createdTask.id,
-            'task_reward',
-            TASK_REWARD_USD,
-            balanceBefore,
-            currentBal,
-            `Reward pour la tâche ${createdTask.id}`
-          ]
-        );
-
-        await client.query('COMMIT');
-
-        console.log(
-          `💰 Reward enregistré: +$${TASK_REWARD_USD.toFixed(2)} | ` +
-          `Worker: ${userId} | ` +
-          `Balance: $${currentBal.toFixed(3)}`
-        );
-
-      } catch (error) {
-
-        await client.query('ROLLBACK');
-
-        console.error(
-          '❌ Erreur PostgreSQL lors du crédit de la tâche:',
-          error
-        );
-
-        throw error;
-
-      } finally {
-
-        client.release();
-      }
-
+      const uid = session.uid || '1000' + Math.floor(Math.random() * 90000000000);
+      const taskId = `task-${Date.now()}`;
       delete userSessions[userId].step;
 
-      await ctx.reply(
-        `🎉 *Tâche validée avec succès !*\n\n` +
-        `✅ Vos informations ont été enregistrées avec succès et synchronisées.\n` +
-        `💵 *+$${TASK_REWARD_USD.toFixed(2)} USD* crédités sur votre solde disponible !\n\n` +
-        `🆔 *UID :* \`${createdTask.uid}\`\n` +
-        `👤 *Nom complet :* ${createdTask.firstName} ${createdTask.lastName}\n` +
-        `🔑 *Mot de passe :* \`${createdTask.password}\`\n` +
-        `💰 *Nouveau solde :* \`$${currentBal.toFixed(3)} USD\`\n` +
-        `📅 *Date :* ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}\n\n` +
-        `_Merci pour votre travail ! Vous pouvez relancer une tâche ci-dessous._`,
-        {
-          parse_mode: 'Markdown',
-          ...MAIN_REPLY_KEYBOARD,
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('🚀 ' + t.btn_tasks, 'task_facebook')],
-            [Markup.button.callback('💰 ' + t.btn_withdraw, 'action_request_withdrawal')]
-          ])
+      let createdTask: any = null;
+
+      try {
+        // 1. ACCOUNT STATUS: A newly created Facebook account must start as "Pending Verification"
+        createdTask = await createTask({
+          taskId,
+          uid,
+          cookies: session.cookies,
+          firstName: session.firstName || 'Alexandre',
+          lastName: session.lastName || 'Dubois',
+          password: session.password || botSettings.customPassword,
+          telegramUserId: String(userId),
+          telegramUsername: username,
+          taskType: session.taskType || 'Facebook',
+          notes: `Enregistré via ${botSettings.platformName} (@TaskifyProBot)`
+        });
+
+        tasks.unshift(createdTask);
+        addLog('info', 'telegram', `📥 Compte Facebook reçu (UID: ${uid}), en attente de vérification...`, createdTask);
+
+        // Send immediate confirmation to user that the account is pending verification
+        await ctx.reply(
+          `⏳ *Compte en cours de vérification...*\n\n` +
+          `✅ Vos informations ont été enregistrées avec succès.\n` +
+          `🆔 *UID :* \`${uid}\`\n` +
+          `👤 *Nom :* ${createdTask.firstName} ${createdTask.lastName}\n` +
+          `📊 *Statut du compte :* \`En attente de vérification\`\n\n` +
+          `_Lancement de la vérification automatique en cours..._`,
+          {
+            parse_mode: 'Markdown',
+            ...MAIN_REPLY_KEYBOARD
+          }
+        );
+
+        // 2. AUTOMATIC BOT CHECK
+        if (botSettings.autoBotCheckEnabled !== false) {
+          try {
+            const verifiedTask = await performBotAccountCheck(createdTask.id, botSettings);
+            const taskIdx = tasks.findIndex(t => t.id === createdTask.id);
+            if (taskIdx !== -1) {
+              tasks[taskIdx] = verifiedTask;
+            }
+            addLog(
+              verifiedTask.verificationResult === 'GREEN' ? 'success' : 'warning',
+              'telegram',
+              `🤖 Vérification automatique Bot (${verifiedTask.verificationResult}): UID ${uid} -> ${verifiedTask.accountStatus}`
+            );
+          } catch (botErr: any) {
+            console.error('❌ Erreur lors de la vérification auto Bot:', botErr.message);
+            addLog('error', 'telegram', `Erreur vérification automatique Bot: ${botErr.message}`);
+          }
         }
-      );
+      } catch (err: any) {
+        console.error('❌ Erreur création tâche bot:', err);
+        await ctx.reply(
+          `❌ *Erreur d'enregistrement :* ${err.message || 'Une erreur est survenue'}. Veuillez réessayer.`,
+          {
+            parse_mode: 'Markdown',
+            ...MAIN_REPLY_KEYBOARD
+          }
+        );
+      }
+      return;
     }
   });
 
@@ -2242,7 +2112,10 @@ app.post('/api/settings', async (req, res) => {
       googleSheetFields,
       platformName,
       welcomeMessage,
-      botToken
+      botToken,
+      facebookCheckerApiUrl,
+      facebookCheckerApiKey,
+      autoBotCheckEnabled
     } = req.body;
 
     if (customPassword !== undefined) {
@@ -2267,6 +2140,18 @@ app.post('/api/settings', async (req, res) => {
 
     if (botToken !== undefined) {
       botSettings.botToken = botToken;
+    }
+
+    if (facebookCheckerApiUrl !== undefined) {
+      botSettings.facebookCheckerApiUrl = facebookCheckerApiUrl;
+    }
+
+    if (facebookCheckerApiKey !== undefined) {
+      botSettings.facebookCheckerApiKey = facebookCheckerApiKey;
+    }
+
+    if (autoBotCheckEnabled !== undefined) {
+      botSettings.autoBotCheckEnabled = Boolean(autoBotCheckEnabled);
     }
 
     await pool.query(
@@ -2335,6 +2220,16 @@ app.post('/api/tasks', async (req, res) => {
     });
 
     tasks.unshift(created);
+
+    // If auto check is enabled, trigger bot check in background
+    if (req.body.runAutoCheck !== false && botSettings.autoBotCheckEnabled !== false) {
+      performBotAccountCheck(created.id, botSettings).then(vTask => {
+        const idx = tasks.findIndex(t => t.id === created.id);
+        if (idx !== -1) tasks[idx] = vTask;
+      }).catch(err => {
+        console.warn('⚠️ Background bot check error:', err.message);
+      });
+    }
 
     addLog(
       'success',
@@ -2411,15 +2306,77 @@ app.delete('/api/tasks/:id', async (req, res) => {
   }
 });
 
-// 5b. Task Rejection
-app.post('/api/tasks/:taskId/reject', async (req, res) => {
+// 5a. Task Validation (Admin / Manager)
+app.post('/api/tasks/:taskId/validate', async (req, res) => {
   try {
     const { taskId } = req.params;
-    const { validatorId = 'admin', reason = 'Rejeté par administrateur' } = req.body;
-    const result = await rejectTask(taskId, validatorId, reason);
+    const { validatorId = 'admin', notes = '', reason = 'Compte vérifié par administrateur' } = req.body;
+    const result = await validateTask(taskId, validatorId, reason || notes || 'Compte validé', 'ADMIN');
+    
+    // Keep in-memory cache in sync
+    const idx = tasks.findIndex(t => t.id === taskId || t.taskId === taskId);
+    if (idx !== -1) tasks[idx] = result;
+
+    addLog('success', 'system', `Tâche ${taskId} validée par ${validatorId} (Compte: VERIFIED, Récompense: $${result.rewardUSD})`);
     res.json({ success: true, task: result });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// 5b. Task Rejection (Admin / Manager)
+app.post('/api/tasks/:taskId/reject', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { validatorId = 'admin', reason = 'Compte rejeté par administrateur' } = req.body;
+    const result = await rejectTask(taskId, validatorId, reason, 'ADMIN');
+
+    // Keep in-memory cache in sync
+    const idx = tasks.findIndex(t => t.id === taskId || t.taskId === taskId);
+    if (idx !== -1) tasks[idx] = result;
+
+    addLog('warning', 'system', `Tâche ${taskId} rejetée par ${validatorId} (Compte: SUSPENDED, Motif: ${reason})`);
+    res.json({ success: true, task: result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// 5c. Task Bot Check (Automated Facebook UID verification)
+app.post('/api/tasks/:taskId/bot-check', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const result = await performBotAccountCheck(taskId, botSettings);
+
+    // Keep in-memory cache in sync
+    const idx = tasks.findIndex(t => t.id === taskId || t.taskId === taskId);
+    if (idx !== -1) tasks[idx] = result;
+
+    addLog('info', 'system', `Bot check exécuté sur la tâche ${taskId} (Résultat: ${result.verificationResult}, Statut: ${result.accountStatus})`);
+    res.json({ success: true, task: result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// 5d. Test Facebook UID Check Live
+app.post('/api/bot/test-uid-check', async (req, res) => {
+  try {
+    const { uid, apiUrl, apiKey } = req.body;
+    if (!uid) return res.status(400).json({ success: false, error: 'UID manquant' });
+    const checkResult = await checkFacebookUid(uid, {
+      facebookCheckerApiUrl: apiUrl || botSettings.facebookCheckerApiUrl,
+      facebookCheckerApiKey: apiKey || botSettings.facebookCheckerApiKey
+    });
+    res.json({
+      success: true,
+      result: checkResult.status,
+      reason: checkResult.reason,
+      source: checkResult.source,
+      rawResponse: checkResult.rawResponse
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -2483,54 +2440,86 @@ app.get('/api/audit-logs', async (req, res) => {
   }
 });
 
-// 6. Settings GET & POST
-app.get('/api/settings', (req, res) => {
-  res.json(botSettings);
+// 5f. Staff & RBAC API
+app.get('/api/staff', async (req, res) => {
+  try {
+    const list = await getAllStaff();
+    res.json(list);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/settings', (req, res) => {
-  const {
-    customPassword,
-    googleSheetWebhookUrl,
-    googleSheetFields,
-    platformName,
-    welcomeMessage,
-    botToken
-  } = req.body;
-
-  if (customPassword !== undefined) {
-    botSettings.customPassword = customPassword;
+app.post('/api/staff', async (req, res) => {
+  try {
+    const { username, password, fullName, role, permissions } = req.body;
+    const result = await createStaffMember({ username, password, fullName, role, permissions });
+    res.status(result.success ? 200 : 400).json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
   }
+});
 
-  if (googleSheetWebhookUrl !== undefined) {
-    botSettings.googleSheetWebhookUrl = googleSheetWebhookUrl;
+app.patch('/api/staff/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = await updateStaffMember(id, req.body);
+    res.status(result.success ? 200 : 400).json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
   }
+});
 
-  // IMPORTANT:
-  // Avela ho voatahiry na dia [] aza.
-  if (Array.isArray(googleSheetFields)) {
-    botSettings.googleSheetFields = googleSheetFields;
+// 5g. Wallets & Transactions API
+app.get('/api/wallets', async (req, res) => {
+  try {
+    const list = await getAllWallets();
+    res.json(list);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
+});
 
-  if (platformName !== undefined) {
-    botSettings.platformName = platformName;
+app.get('/api/transactions', async (req, res) => {
+  try {
+    const list = await getAllTransactions();
+    res.json(list);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
+});
 
-  if (welcomeMessage !== undefined) {
-    botSettings.welcomeMessage = welcomeMessage;
+// 5h. Staff Authentication API
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const result = await loginStaff(username, password);
+    res.status(result.success ? 200 : 401).json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
   }
+});
 
-  if (botToken !== undefined) {
-    botSettings.botToken = botToken;
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Token manquant' });
+    const staff = await verifySession(token);
+    if (!staff) return res.status(401).json({ error: 'Session invalide ou expirée' });
+    res.json({ staff });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
+});
 
-  addLog(
-    'info',
-    'system',
-    `Paramètres mis à jour (Mot de passe dynamique: ${botSettings.customPassword})`
-  );
-
-  res.json(botSettings);
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (token) await logoutStaff(token);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 7. Bot Simulation Engine (Exact Telegram State Machine)

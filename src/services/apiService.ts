@@ -682,10 +682,10 @@ export async function validateTaskApi(taskId: string, validatorId: string = 'adm
   const res = await safeFetchJson<{ success: boolean; task?: TaskRecord; message?: string }>(`/api/tasks/${taskId}/validate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ validatorId, notes })
+    body: JSON.stringify({ validatorId, notes, reason: notes })
   });
   if (res && res.success) {
-    addClientLog('success', 'system', `Tâche ${taskId} validée avec succès`);
+    addClientLog('success', 'system', `Tâche ${taskId} validée avec succès (Compte Vérifié, +$0.04)`);
     return res;
   }
   return { success: false, message: res?.message || 'Erreur validation' };
@@ -698,10 +698,22 @@ export async function rejectTaskApi(taskId: string, validatorId: string = 'admin
     body: JSON.stringify({ validatorId, reason })
   });
   if (res && res.success) {
-    addClientLog('warning', 'system', `Tâche ${taskId} rejetée: ${reason}`);
+    addClientLog('warning', 'system', `Tâche ${taskId} rejetée (Compte Suspendu, 0$) : ${reason}`);
     return res;
   }
   return { success: false, message: res?.message || 'Erreur rejet' };
+}
+
+export async function runBotCheckApi(taskId: string): Promise<{ success: boolean; task?: TaskRecord; message?: string }> {
+  const res = await safeFetchJson<{ success: boolean; task?: TaskRecord; message?: string }>(`/api/tasks/${taskId}/bot-check`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (res && res.success) {
+    addClientLog('info', 'system', `Vérification automatique Bot exécutée sur la tâche ${taskId}`);
+    return res;
+  }
+  return { success: false, message: res?.message || 'Erreur vérification bot' };
 }
 
 export async function fetchWithdrawals(status?: string): Promise<any[]> {
