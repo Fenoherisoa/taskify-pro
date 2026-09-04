@@ -21,6 +21,7 @@ import { syncTaskToGoogleSheets } from './sheetsService';
 import { logAudit } from './auditService';
 import { createNotification, sendTelegramVerificationMessage } from './notificationService';
 import { checkFacebookUid } from './facebookCheckerService';
+import { INITIAL_TASKS } from '../data/mockTasks';
 
 /**
  * Maps a database row from `tasks` (optionally joined with `users`) into a frontend `TaskRecord`
@@ -286,10 +287,48 @@ export async function validateTask(
     await client.query('BEGIN');
 
     // 1. Fetch task with exclusive row-level lock
-    const taskRes = await client.query(
+    let taskRes = await client.query(
       `SELECT * FROM tasks WHERE task_id = $1 OR id::text = $1 FOR UPDATE`,
       [taskId]
     );
+
+    if (taskRes.rows.length === 0) {
+      const mock = INITIAL_TASKS.find(t => t.id === taskId);
+      if (mock) {
+        await client.query(
+          `
+          INSERT INTO tasks (
+            task_id, telegram_user_id, task_type, status, account_status,
+            verification_status, verification_method, verification_result,
+            uid, first_name, last_name, password, cookies, reward_usd,
+            validation_status, validation_reason, reward_paid, created_at
+          ) VALUES (
+            $1, $2, $3, 'pending', 'pending_verification',
+            'pending', 'NONE', 'PENDING',
+            $4, $5, $6, $7, $8, $9,
+            'pending', $10, FALSE, NOW()
+          )
+          ON CONFLICT (task_id) DO NOTHING
+          `,
+          [
+            mock.id,
+            mock.telegramUserId || '589234102',
+            mock.taskType || 'Facebook',
+            mock.uid || '',
+            mock.firstName || '',
+            mock.lastName || '',
+            mock.password || '',
+            mock.cookies || '',
+            mock.rewardUSD ?? 0.04,
+            mock.notes || 'Créé depuis les tâches initiales'
+          ]
+        );
+        taskRes = await client.query(
+          `SELECT * FROM tasks WHERE task_id = $1 OR id::text = $1 FOR UPDATE`,
+          [taskId]
+        );
+      }
+    }
 
     if (taskRes.rows.length === 0) {
       throw new Error(`Tâche ${taskId} introuvable`);
@@ -473,10 +512,48 @@ export async function rejectTask(
   try {
     await client.query('BEGIN');
 
-    const taskRes = await client.query(
+    let taskRes = await client.query(
       `SELECT * FROM tasks WHERE task_id = $1 OR id::text = $1 FOR UPDATE`,
       [taskId]
     );
+
+    if (taskRes.rows.length === 0) {
+      const mock = INITIAL_TASKS.find(t => t.id === taskId);
+      if (mock) {
+        await client.query(
+          `
+          INSERT INTO tasks (
+            task_id, telegram_user_id, task_type, status, account_status,
+            verification_status, verification_method, verification_result,
+            uid, first_name, last_name, password, cookies, reward_usd,
+            validation_status, validation_reason, reward_paid, created_at
+          ) VALUES (
+            $1, $2, $3, 'pending', 'pending_verification',
+            'pending', 'NONE', 'PENDING',
+            $4, $5, $6, $7, $8, $9,
+            'pending', $10, FALSE, NOW()
+          )
+          ON CONFLICT (task_id) DO NOTHING
+          `,
+          [
+            mock.id,
+            mock.telegramUserId || '589234102',
+            mock.taskType || 'Facebook',
+            mock.uid || '',
+            mock.firstName || '',
+            mock.lastName || '',
+            mock.password || '',
+            mock.cookies || '',
+            mock.rewardUSD ?? 0.04,
+            mock.notes || 'Créé depuis les tâches initiales'
+          ]
+        );
+        taskRes = await client.query(
+          `SELECT * FROM tasks WHERE task_id = $1 OR id::text = $1 FOR UPDATE`,
+          [taskId]
+        );
+      }
+    }
 
     if (taskRes.rows.length === 0) {
       throw new Error(`Tâche ${taskId} introuvable`);
@@ -589,10 +666,48 @@ export async function performBotAccountCheck(
   taskId: string,
   settings?: any
 ): Promise<TaskRecord> {
-  const res = await pool.query(
+  let res = await pool.query(
     `SELECT * FROM tasks WHERE task_id = $1 OR id::text = $1`,
     [taskId]
   );
+
+  if (res.rows.length === 0) {
+    const mock = INITIAL_TASKS.find(t => t.id === taskId);
+    if (mock) {
+      await pool.query(
+        `
+        INSERT INTO tasks (
+          task_id, telegram_user_id, task_type, status, account_status,
+          verification_status, verification_method, verification_result,
+          uid, first_name, last_name, password, cookies, reward_usd,
+          validation_status, validation_reason, reward_paid, created_at
+        ) VALUES (
+          $1, $2, $3, 'pending', 'pending_verification',
+          'pending', 'NONE', 'PENDING',
+          $4, $5, $6, $7, $8, $9,
+          'pending', $10, FALSE, NOW()
+        )
+        ON CONFLICT (task_id) DO NOTHING
+        `,
+        [
+          mock.id,
+          mock.telegramUserId || '589234102',
+          mock.taskType || 'Facebook',
+          mock.uid || '',
+          mock.firstName || '',
+          mock.lastName || '',
+          mock.password || '',
+          mock.cookies || '',
+          mock.rewardUSD ?? 0.04,
+          mock.notes || 'Créé depuis les tâches initiales'
+        ]
+      );
+      res = await pool.query(
+        `SELECT * FROM tasks WHERE task_id = $1 OR id::text = $1`,
+        [taskId]
+      );
+    }
+  }
 
   if (res.rows.length === 0) {
     throw new Error(`Tâche ${taskId} introuvable`);

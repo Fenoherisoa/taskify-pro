@@ -2387,13 +2387,11 @@ app.post('/api/settings', async (req, res) => {
 app.get('/api/tasks', async (req, res) => {
   try {
     const list = await getAllTasks(req.query.status as string);
-    if (list.length > 0) {
-      return res.json(list);
-    }
+    return res.json(list);
   } catch (err: any) {
     console.error('API /api/tasks error:', err.message);
+    res.json(tasks);
   }
-  res.json(tasks);
 });
 
 // 3b. Create task in PostgreSQL

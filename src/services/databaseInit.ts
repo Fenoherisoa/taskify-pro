@@ -1,5 +1,6 @@
 import { pool } from './database';
 import { initSuperAdmin } from './authService';
+import { INITIAL_TASKS } from '../data/mockTasks';
 
 /**
  * ============================================================
@@ -760,6 +761,87 @@ export async function initializeDatabase() {
 
       WHERE account_created IS NULL;
     `);
+
+    // ========================================================
+    // 18B. SEED INITIAL TASKS (Ensure mock tasks exist in PostgreSQL)
+    // ========================================================
+    try {
+      for (const t of INITIAL_TASKS) {
+        // Ensure user exists
+        if (t.telegramUserId) {
+          await pool.query(
+            `
+            INSERT INTO users (telegram_user_id, telegram_username, first_name, last_name, created_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (telegram_user_id) DO NOTHING
+            `,
+            [t.telegramUserId, t.telegramUsername || '', t.firstName || '', t.lastName || '']
+          );
+
+          const uRes = await pool.query(
+            `SELECT id FROM users WHERE telegram_user_id = $1`,
+            [t.telegramUserId]
+          );
+          if (uRes.rows.length > 0) {
+            await pool.query(
+              `INSERT INTO wallets (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
+              [uRes.rows[0].id]
+            );
+          }
+        }
+
+        const isVerified = t.status === 'compte créé' || t.status === 'vérifié';
+        const isRejected = t.status === 'compte suspendu' || t.status === 'annulé';
+        const accountStatus = isVerified ? 'verified' : (isRejected ? 'suspended' : 'pending_verification');
+        const validationStatus = isVerified ? 'validated' : (isRejected ? 'rejected' : 'pending');
+        const verificationStatus = isVerified ? 'verified' : (isRejected ? 'rejected' : 'pending');
+
+        await pool.query(
+          `
+          INSERT INTO tasks (
+            task_id, telegram_user_id, task_type, status, account_status,
+            verification_status, verification_method, verification_result,
+            uid, first_name, last_name, password, cookies, reward_usd,
+            validation_status, validation_reason, reward_paid, account_created,
+            synced_to_sheets, created_at, completed_at
+          )
+          VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8,
+            $9, $10, $11, $12, $13, $14,
+            $15, $16, $17, $18,
+            $19, $20, $21
+          )
+          ON CONFLICT (task_id) DO NOTHING
+          `,
+          [
+            t.id,
+            t.telegramUserId || '',
+            t.taskType || 'Facebook',
+            t.status || 'pending',
+            accountStatus,
+            verificationStatus,
+            isVerified || isRejected ? 'ADMIN' : 'NONE',
+            isVerified ? 'GREEN' : (isRejected ? 'RED' : 'PENDING'),
+            t.uid || '',
+            t.firstName || '',
+            t.lastName || '',
+            t.password || '',
+            t.cookies || '',
+            t.rewardUSD ?? 0.04,
+            validationStatus,
+            t.notes || '',
+            isVerified,
+            isVerified,
+            Boolean(t.syncedToGoogleSheets),
+            t.createdAt || new Date().toISOString(),
+            isVerified || isRejected ? (t.updatedAt || new Date().toISOString()) : null
+          ]
+        );
+      }
+    } catch (seedErr: any) {
+      console.warn('⚠️ Initial tasks seeding notice:', seedErr.message);
+    }
 
     // ========================================================
     // 19. DATABASE CHECK
