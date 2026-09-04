@@ -33,7 +33,9 @@ export const DEFAULT_BOT_MESSAGES: BotMessagesConfig = {
     verification_verified: `✅ Compte vérifié\n\nVotre compte Facebook a été validé avec succès.\n💰 +${'{reward}'} USD ajouté à votre solde.\n\n💵 Solde actuel : ${'{balance}'} USD`,
     verification_rejected: `❌ Compte refusé\n\nVotre compte Facebook n'a pas été accepté.\nMotif : ${'{reason}'}\n\n💵 Solde actuel : ${'{balance}'} USD`,
     wallet_info_saved: `✅ Coordonnées de portefeuille enregistrées avec succès !`,
-    wallet_info_deleted: `🗑️ Coordonnées de portefeuille supprimées avec succès.`
+    wallet_info_deleted: `🗑️ Coordonnées de portefeuille supprimées avec succès.`,
+    task_submitted_confirmation: `✅ *Tâche reçue avec succès !*\n\nVotre tâche a été enregistrée et est désormais **en attente de validation** par l'administrateur.\n\nVous pouvez créer une nouvelle tâche dès que vous le souhaitez.`,
+    btn_create_new_task: `➕ Créer une nouvelle tâche`
   },
   en: {
     welcome: `👋 *Welcome to Taskify Pro (@TaskifyProBot)!*\n\nOfficial automated platform for rewarded account creation tasks.\n\n💵 *Task Reward:* \`$0.04\` per verified account\n🎯 *Min Payout:* \`$1.00\`\n\nUse the persistent menu below to start working:`,
@@ -66,7 +68,9 @@ export const DEFAULT_BOT_MESSAGES: BotMessagesConfig = {
     verification_verified: `✅ Account verified\n\nYour Facebook account has been verified successfully.\n💰 +${'{reward}'} USD added to your balance.\n\n💵 Current balance : ${'{balance}'} USD`,
     verification_rejected: `❌ Account rejected\n\nYour Facebook account was not accepted.\nReason : ${'{reason}'}\n\n💵 Current balance : ${'{balance}'} USD`,
     wallet_info_saved: `✅ Wallet information saved successfully!`,
-    wallet_info_deleted: `🗑️ Wallet information removed successfully.`
+    wallet_info_deleted: `🗑️ Wallet information removed successfully.`,
+    task_submitted_confirmation: `✅ *Task successfully received!*\n\nYour task has been submitted and is now **pending validation** by the administrator.\n\nYou can create another task whenever you want.`,
+    btn_create_new_task: `➕ Create New Task`
   },
   mg: {
     welcome: `👋 *Tongasoa eto amin'ny Taskify Pro (@TaskifyProBot) !*\n\nSehatra ofisialy fanatontosana asa sy fakana vola.\n\n💵 *Karama :* \`$0.04\` isaky ny kaonty voamarina\n🎯 *Farafahakeliny azo alaina :* \`$1.00\`\n\nAmpiasao ny safidy eto ambany hanombohana :`,
@@ -99,7 +103,9 @@ export const DEFAULT_BOT_MESSAGES: BotMessagesConfig = {
     verification_verified: `✅ Kaonty voamarina\n\nNekena soa aman-tsara ny kaontinao.\n💰 +${'{reward}'} USD nampidirina tamin'ny solde-nao.\n\n💵 Solde ankehitriny : ${'{balance}'} USD`,
     verification_rejected: `❌ Kaonty nolavina\n\nTsy nekena ny kaontinao.\nAntony : ${'{reason}'}\n\n💵 Solde ankehitriny : ${'{balance}'} USD`,
     wallet_info_saved: `✅ Voatahiry soa aman-tsara ny adiresy fandraisana volanao !`,
-    wallet_info_deleted: `🗑️ Voafafa soa aman-tsara ny adiresy fandraisana volanao.`
+    wallet_info_deleted: `🗑️ Voafafa soa aman-tsara ny adiresy fandraisana volanao.`,
+    task_submitted_confirmation: `✅ *Voaray soa aman-tsara ny asa !*\n\nVoarakitra ny asanao ary **miandry fankatoavana** avy amin'ny mpitantana.\n\nAfaka manomboka asa vaovao ianao dieny izao.`,
+    btn_create_new_task: `➕ Hanao asa vaovao`
   }
 };
 

@@ -2384,29 +2384,15 @@ bot.on(
         text;
 
       session.step =
-        'AWAITING_SUBMISSION';
+        'AWAITING_COOKIES';
 
       await ctx.reply(
-
-        `✅ *UID reçu.*\n\n` +
-
-        `La soumission peut maintenant être enregistrée.\n\n` +
-
-        `📌 Statut initial : *PENDING*\n\n` +
-
-        `⚠️ Aucun reward ne sera crédité avant la validation administrateur.`,
-
+        `✅ *UID reçu avec succès :* \`${text}\`\n\n` +
+        `🍪 *Étape 2/2 : Envoi des Cookies*\n\n` +
+        `Veuillez maintenant coller vos **Cookies Facebook** complets (ex: format \`datr=...; c_user=...; xs=...\`) :`,
         {
           parse_mode: 'Markdown',
-
           ...Markup.inlineKeyboard([
-            [
-              Markup.button.callback(
-                '✅ Confirmer la soumission',
-                'confirm_task_submission'
-              )
-            ],
-
             [
               Markup.button.callback(
                 '❌ Annuler',
@@ -2416,6 +2402,158 @@ bot.on(
           ])
         }
       );
+
+      return;
+    }
+
+    // --------------------------------------------------------
+    // COOKIES SUBMISSION
+    // --------------------------------------------------------
+
+    if (
+      session.step ===
+      'AWAITING_COOKIES'
+    ) {
+      const trimmedCookies = text ? text.trim() : '';
+
+      if (!trimmedCookies || trimmedCookies.length < 10 || !trimmedCookies.includes('=')) {
+        return ctx.reply(
+          `⚠️ *Cookies invalides ou incomplets.*\n\n` +
+          `Veuillez envoyer des **Cookies Facebook** valides et complets (ex: format \`datr=...; c_user=...; xs=...\`).`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [
+                Markup.button.callback(
+                  '❌ Annuler',
+                  'action_cancel'
+                )
+              ]
+            ])
+          }
+        );
+      }
+
+      session.cookies = trimmedCookies;
+      const uid = session.uid;
+      const taskId = `task-${Date.now()}-${userId}`;
+
+      // Reset step so session is not stuck in AWAITING_COOKIES
+      delete session.step;
+
+      const client = await pool.connect();
+
+      try {
+        await client.query('BEGIN');
+
+        // Check duplicate UID
+        const duplicate = await client.query(
+          `
+          SELECT task_id
+          FROM tasks
+          WHERE uid = $1
+          LIMIT 1
+          FOR UPDATE
+          `,
+          [uid]
+        );
+
+        if (duplicate.rows.length > 0) {
+          await client.query('ROLLBACK');
+          delete userSessions[userId];
+          return ctx.reply(
+            `⚠️ *UID déjà enregistré.*\n\nCette soumission existe déjà dans le système.`,
+            {
+              parse_mode: 'Markdown',
+              ...Markup.inlineKeyboard([
+                [
+                  Markup.button.callback(
+                    '➕ Créer une nouvelle tâche',
+                    'task_facebook'
+                  )
+                ]
+              ])
+            }
+          );
+        }
+
+        const user = await getUserData(userId, username, telegramFirstName);
+        const firstName = session.firstName || user.first_name || telegramFirstName;
+        const lastName = session.lastName || user.last_name || '';
+
+        await client.query(
+          `
+          INSERT INTO tasks (
+            task_id,
+            telegram_user_id,
+            task_type,
+            status,
+            validation_status,
+            uid,
+            first_name,
+            last_name,
+            cookies,
+            reward_usd,
+            reward_paid,
+            account_created,
+            created_at
+          )
+          VALUES (
+            $1, $2, 'Facebook', 'pending', 'pending',
+            $3, $4, $5, $6, $7, FALSE,
+            TRUE, NOW()
+          )
+          `,
+          [
+            taskId,
+            userId,
+            uid,
+            firstName,
+            lastName,
+            trimmedCookies,
+            TASK_REWARD_USD
+          ]
+        );
+
+        await client.query('COMMIT');
+        delete userSessions[userId];
+
+        return ctx.reply(
+          `✅ *Tâche reçue avec succès !*\n\n` +
+          `Votre tâche a été enregistrée et est désormais **en attente de validation** par l'administrateur.\n\n` +
+          `Vous pouvez créer une nouvelle tâche dès que vous le souhaitez.`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [
+                Markup.button.callback(
+                  '➕ Créer une nouvelle tâche',
+                  'task_facebook'
+                )
+              ]
+            ])
+          }
+        );
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('❌ Erreur insertion tâche bot.js:', err);
+        return ctx.reply(
+          `❌ *Erreur d'enregistrement :* ${err.message || 'Une erreur est survenue'}. Veuillez réessayer.`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [
+                Markup.button.callback(
+                  '➕ Créer une nouvelle tâche',
+                  'task_facebook'
+                )
+              ]
+            ])
+          }
+        );
+      } finally {
+        client.release();
+      }
 
       return;
     }

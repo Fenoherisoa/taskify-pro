@@ -878,14 +878,17 @@ const TRANSLATIONS = {
       `4. Rémunération : \`$${TASK_REWARD_USD.toFixed(2)}\` par tâche validée.`,
     awaiting_uid: `✍️ *Étape 1/2 : Envoi de l'UID Facebook*\n\nVeuillez coller votre **UID Facebook** (ex: \`100084928172910\`) :`,
     awaiting_cookies: `🍪 *Étape 2/2 : Envoi des Cookies*\n\nVeuillez maintenant coller vos **Cookies Facebook** complets (ex: format \`datr=...; c_user=...; xs=...\`) :`,
-    cancelled: `❌ *Processus annulé.*\nAucune donnée n'a été enregistrée.`
+    cancelled: `❌ *Processus annulé.*\nAucune donnée n'a été enregistrée.`,
+    task_submitted_confirmation: `✅ *Tâche reçue avec succès !*\n\nVotre tâche a été enregistrée et est désormais **en attente de validation** par l'administrateur.\n\nVous pouvez créer une nouvelle tâche dès que vous le souhaitez.`,
+    invalid_cookies: `⚠️ *Cookies invalides ou incomplets.*\n\nVeuillez envoyer des **Cookies Facebook** valides (ex: format \`datr=...; c_user=...; xs=...\`).`,
+    btn_create_new_task: `➕ Créer une nouvelle tâche`
   },
   en: {
     welcome: `👋 *Welcome to ${botSettings.platformName} (@TaskifyProBot)!*\n\n` +
       `Official automated platform for rewarded account creation tasks.\n\n` +
-      `💵 *Task Reward:* \`$${TASK_REWARD_USD.toFixed(2)}\` per verified account\n` +
-      `🎁 *Referral Bonus:* \`$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` on signup + \`${REFERRAL_COMMISSION_PERCENT}%\` commission per referred task\n` +
-      `🎯 *Min Payout:* \`$${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
+      `💵 *Task Reward:* \`${TASK_REWARD_USD.toFixed(2)}\` per verified account\n` +
+      `🎁 *Referral Bonus:* \`${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` on signup + \`${REFERRAL_COMMISSION_PERCENT}%\` commission per referred task\n` +
+      `🎯 *Min Payout:* \`${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
       `Use the persistent menu below to start working:`,
     balance_title: `💰 *Your Balance & Performance*`,
     tasks_title: `🌐 *Task: Facebook Account Creation*`,
@@ -904,15 +907,18 @@ const TRANSLATIONS = {
     btn_2fa: `🔐 2FA (Access Key)`,
     btn_send_uid: `📥 Submit UID`,
     btn_share_ref: `📤 Share Referral Link`,
-    cookies_reward_notice: `💵 *Reward per verified account:* \`$${TASK_REWARD_USD.toFixed(2)}\``,
+    cookies_reward_notice: `💵 *Reward per verified account:* \`${TASK_REWARD_USD.toFixed(2)}\``,
     task_rules_text: `📋 *Facebook Account Guidelines*\n\n` +
       `1. Always use the generated First & Last name.\n` +
       `2. Use the exact assigned password.\n` +
       `3. Export full cookies including \`c_user\`, \`datr\` and \`xs\`.\n` +
-      `4. Reward: \`$${TASK_REWARD_USD.toFixed(2)}\` per valid submission.`,
+      `4. Reward: \`${TASK_REWARD_USD.toFixed(2)}\` per valid submission.`,
     awaiting_uid: `✍️ *Step 1/2: Submit Facebook UID*\n\nPlease paste your **Facebook UID** (e.g. \`100084928172910\`) :`,
     awaiting_cookies: `🍪 *Step 2/2: Submit Cookies*\n\nPlease paste your full **Facebook Cookies** (e.g. \`datr=...; c_user=...; xs=...\`) :`,
-    cancelled: `❌ *Process cancelled.*\nNo data has been saved.`
+    cancelled: `❌ *Process cancelled.*\nNo data has been saved.`,
+    task_submitted_confirmation: `✅ *Task successfully received!*\n\nYour task has been submitted and is now **pending validation** by the administrator.\n\nYou can create another task whenever you want.`,
+    invalid_cookies: `⚠️ *Invalid or incomplete cookies.*\n\nPlease send valid **Facebook Cookies** (e.g. format \`datr=...; c_user=...; xs=...\`).`,
+    btn_create_new_task: `➕ Create New Task`
   },
   ru: {
     welcome: `👋 *Добро пожаловать в ${botSettings.platformName} (@TaskifyProBot)!*\n\n` +
@@ -946,14 +952,17 @@ const TRANSLATIONS = {
       `4. Оплата: \`$${TASK_REWARD_USD.toFixed(2)}\` за каждое задание.`,
     awaiting_uid: `✍️ *Шаг 1/2: Отправка Facebook UID*\n\nОтправьте ваш **UID Facebook** (напр. \`100084928172910\`) :`,
     awaiting_cookies: `🍪 *Шаг 2/2: Отправка Cookies*\n\nОтправьте полные **Cookies Facebook** (напр. \`datr=...; c_user=...; xs=...\`) :`,
-    cancelled: `❌ *Процесс отменен.*\nДанные не были сохранены.`
+    cancelled: `❌ *Процесс отменен.*\nДанные не были сохранены.`,
+    task_submitted_confirmation: `✅ *Задание успешно принято!*\n\nВаше задание сохранено и находится **на проверке администратором**.\n\nВы можете создать новое задание в любое время.`,
+    invalid_cookies: `⚠️ *Недействительные cookies.*\n\nПожалуйста, отправьте корректные **Facebook Cookies** (напр. \`datr=...; c_user=...; xs=...\`).`,
+    btn_create_new_task: `➕ Создать новое задание`
   },
   es: {
     welcome: `👋 *¡Bienvenido a ${botSettings.platformName} (@TaskifyProBot)!*\n\n` +
       `Plataforma oficial para tareas remuneradas de creación de cuentas.\n\n` +
-      `💵 *Pago por tarea:* \`$${TASK_REWARD_USD.toFixed(2)}\` por cuenta validada\n` +
-      `🎁 *Bono de Referidos:* \`$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` por registro + \`${REFERRAL_COMMISSION_PERCENT}%\` de comisión continua\n` +
-      `🎯 *Retiro mínimo:* \`$${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
+      `💵 *Pago por tarea:* \`${TASK_REWARD_USD.toFixed(2)}\` por cuenta validada\n` +
+      `🎁 *Bono de Referidos:* \`${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` por registro + \`${REFERRAL_COMMISSION_PERCENT}%\` de comisión continua\n` +
+      `🎯 *Retiro mínimo:* \`${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
       `Usa el menú inferior para comenzar :`,
     balance_title: `💰 *Tu Saldo y Rendimiento*`,
     tasks_title: `🌐 *Tarea: Creación de Cuenta Facebook*`,
@@ -972,22 +981,25 @@ const TRANSLATIONS = {
     btn_2fa: `🔐 2FA (Código de acceso)`,
     btn_send_uid: `📥 Enviar UID`,
     btn_share_ref: `📤 Compartir enlace`,
-    cookies_reward_notice: `💵 *Pago por cuenta verificada:* \`$${TASK_REWARD_USD.toFixed(2)}\``,
+    cookies_reward_notice: `💵 *Pago por cuenta verificada:* \`${TASK_REWARD_USD.toFixed(2)}\``,
     task_rules_text: `📋 *Reglas para Cuentas de Facebook*\n\n` +
       `1. Usa siempre el nombre y apellido generados.\n` +
       `2. Usa la contraseña asignada sin cambios.\n` +
       `3. Extrae las cookies completas (\`c_user\`, \`datr\`, \`xs\`).\n` +
-      `4. Recompensa: \`$${TASK_REWARD_USD.toFixed(2)}\` por tarea validada.`,
+      `4. Recompensa: \`${TASK_REWARD_USD.toFixed(2)}\` por tarea validada.`,
     awaiting_uid: `✍️ *Paso 1/2: Enviar UID de Facebook*\n\nEnvía tu **UID de Facebook** (ej: \`100084928172910\`) :`,
     awaiting_cookies: `🍪 *Paso 2/2: Enviar Cookies*\n\nEnvía tus **Cookies de Facebook** completas (ej: \`datr=...; c_user=...; xs=...\`) :`,
-    cancelled: `❌ *Proceso cancelado.*\nNo se guardó información.`
+    cancelled: `❌ *Proceso cancelado.*\nNo se guardó información.`,
+    task_submitted_confirmation: `✅ *¡Tarea recibida con éxito!*\n\nTu tarea ha sido enviada y está **pendiente de validación** por el administrador.\n\nPuedes crear otra tarea cuando desees.`,
+    invalid_cookies: `⚠️ *Cookies inválidas o incompletas.*\n\nPor favor envía **Cookies de Facebook** válidas (ej: \`datr=...; c_user=...; xs=...\`).`,
+    btn_create_new_task: `➕ Crear nueva tarea`
   },
   id: {
     welcome: `👋 *Selamat Datang di ${botSettings.platformName} (@TaskifyProBot)!*\n\n` +
       `Platform otomatis resmi untuk pengerjaan tugas pembuatan akun berbayar.\n\n` +
-      `💵 *Hadiah per Akun:* \`$${TASK_REWARD_USD.toFixed(2)}\` per akun tervalidasi\n` +
-      `🎁 *Bonus Referral:* \`$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` pendaftaran + komisi \`${REFERRAL_COMMISSION_PERCENT}%\` dari setiap tugas referral\n` +
-      `🎯 *Minimal Penarikan:* \`$${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
+      `💵 *Hadiah per Akun:* \`${TASK_REWARD_USD.toFixed(2)}\` per akun tervalidasi\n` +
+      `🎁 *Bonus Referral:* \`${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` pendaftaran + komisi \`${REFERRAL_COMMISSION_PERCENT}%\` dari setiap tugas referral\n` +
+      `🎯 *Minimal Penarikan:* \`${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
       `Gunakan menu di bawah untuk memulai:`,
     balance_title: `💰 *Saldo & Aktivitas Anda*`,
     tasks_title: `🌐 *Tugas: Pembuatan Akun Facebook*`,
@@ -1006,22 +1018,25 @@ const TRANSLATIONS = {
     btn_2fa: `🔐 2FA (Kode Akses)`,
     btn_send_uid: `📥 Kirim UID`,
     btn_share_ref: `📤 Bagikan Link Referral`,
-    cookies_reward_notice: `💵 *Imbalan per akun terverifikasi:* \`$${TASK_REWARD_USD.toFixed(2)}\``,
+    cookies_reward_notice: `💵 *Imbalan per akun terverifikasi:* \`${TASK_REWARD_USD.toFixed(2)}\``,
     task_rules_text: `📋 *Panduan Akun Facebook*\n\n` +
       `1. Selalu gunakan nama depan dan belakang yang diberikan.\n` +
       `2. Gunakan kata sandi yang telah ditentukan tanpa diubah.\n` +
       `3. Ekspor cookies lengkap (\`c_user\`, \`datr\`, \`xs\`).\n` +
-      `4. Imbalan: \`$${TASK_REWARD_USD.toFixed(2)}\` per tugas valid.`,
+      `4. Imbalan: \`${TASK_REWARD_USD.toFixed(2)}\` per tugas valid.`,
     awaiting_uid: `✍️ *Langkah 1/2: Kirim UID Facebook*\n\nSilakan tempel **UID Facebook** Anda (contoh: \`100084928172910\`) :`,
     awaiting_cookies: `🍪 *Langkah 2/2: Kirim Cookies*\n\nSilakan tempel **Cookies Facebook** lengkap (contoh: \`datr=...; c_user=...; xs=...\`) :`,
-    cancelled: `❌ *Proses dibatalkan.*\nTidak ada data yang disimpan.`
+    cancelled: `❌ *Proses dibatalkan.*\nTidak ada data yang disimpan.`,
+    task_submitted_confirmation: `✅ *Tugas berhasil diterima!*\n\nTugas Anda telah dikirim dan sekarang **menunggu validasi** oleh administrator.\n\nAnda dapat membuat tugas baru kapan saja.`,
+    invalid_cookies: `⚠️ *Cookies tidak valid atau tidak lengkap.*\n\nSilakan kirim **Cookies Facebook** yang valid (contoh: \`datr=...; c_user=...; xs=...\`).`,
+    btn_create_new_task: `➕ Buat Tugas Baru`
   },
   mg: {
     welcome: `👋 *Tongasoa eto amin'ny ${botSettings.platformName} (@TaskifyProBot) !*\n\n` +
       `Sehatra ofisialy fanatontosana asa sy fakana vola.\n\n` +
-      `💵 *Karama :* \`$${TASK_REWARD_USD.toFixed(2)}\` isaky ny kaonty voamarina\n` +
-      `🎁 *Tombony Fanasana :* \`$${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` amin'ny fisoratana anarana + \`${REFERRAL_COMMISSION_PERCENT}%\` amin'ny asan'ny olona nasainao\n` +
-      `🎯 *Farafahakeliny azo alaina :* \`$${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
+      `💵 *Karama :* \`${TASK_REWARD_USD.toFixed(2)}\` isaky ny kaonty voamarina\n` +
+      `🎁 *Tombony Fanasana :* \`${REFERRAL_SIGNUP_BONUS_USD.toFixed(2)}\` amin'ny fisoratana anarana + \`${REFERRAL_COMMISSION_PERCENT}%\` amin'ny asan'ny olona nasainao\n` +
+      `🎯 *Farafahakeliny azo alaina :* \`${MIN_WITHDRAWAL_USD.toFixed(2)}\`\n\n` +
       `Ampiasao ny safidy eto ambany hanombohana :`,
     balance_title: `💰 *Ny Solde & Asanao*`,
     tasks_title: `🌐 *Asa : Famoronana Kaonty Facebook*`,
@@ -1040,15 +1055,18 @@ const TRANSLATIONS = {
     btn_2fa: `🔐 2FA (Fanalahidy)`,
     btn_send_uid: `📥 Handefa ny UID`,
     btn_share_ref: `📤 Hizarana ny Rohy Fanasana`,
-    cookies_reward_notice: `💵 *Karama isaky ny kaonty voamarina :* \`$${TASK_REWARD_USD.toFixed(2)}\``,
+    cookies_reward_notice: `💵 *Karama isaky ny kaonty voamarina :* \`${TASK_REWARD_USD.toFixed(2)}\``,
     task_rules_text: `📋 *Fitsipika Famoronana Kaonty Facebook*\n\n` +
       `1. Ampiasao foana ny anarana sy fanampin'anarana nomena.\n` +
       `2. Ampiasao ny teny miafina nomena tsy asiana fiovana.\n` +
       `3. Raiso ny cookies feno misy \`c_user\`, \`datr\` ary \`xs\`.\n` +
-      `4. Karama : \`$${TASK_REWARD_USD.toFixed(2)}\` isaky ny asa voamarina.`,
+      `4. Karama : \`${TASK_REWARD_USD.toFixed(2)}\` isaky ny asa voamarina.`,
     awaiting_uid: `✍️ *Dingana 1/2 : Mandefa UID Facebook*\n\nApetaho eto ny **UID Facebook** (ohatra : \`100084928172910\`) :`,
     awaiting_cookies: `🍪 *Dingana 2/2 : Mandefa Cookies*\n\nApetaho eto ny **Cookies Facebook** feno (ohatra : \`datr=...; c_user=...; xs=...\`) :`,
-    cancelled: `❌ *Natsahatra ny hetsika.*\nTsy nisy tahiry voatahiry.`
+    cancelled: `❌ *Natsahatra ny hetsika.*\nTsy nisy tahiry voatahiry.`,
+    task_submitted_confirmation: `✅ *Voaray soa aman-tsara ny asa !*\n\nVoarakitra ny asanao ary **miandry fankatoavana** avy amin'ny mpitantana.\n\nAfaka manomboka asa vaovao ianao dieny izao.`,
+    invalid_cookies: `⚠️ *Cookies tsy mety na tsy feno.*\n\nAzafady mandefasa **Cookies Facebook** feno sy manankery (ohatra : \`datr=...; c_user=...; xs=...\`).`,
+    btn_create_new_task: `➕ Hanao asa vaovao`
   }
 };
 
@@ -1903,8 +1921,8 @@ function setupTelegrafHandlers(bot: Telegraf) {
     );
   });
 
-  bot.action('task_facebook', async (ctx) => {
-    await ctx.answerCbQuery();
+  bot.action(['task_facebook', 'btn_create_new_task', 'create_new_task'], async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
     const userId = String(ctx.from?.id || 'unknown');
     if (!userSessions[userId]) userSessions[userId] = { step: 'AUTH_CHOICE', taskType: 'Facebook', language: 'fr' };
     else {
@@ -2097,7 +2115,7 @@ function setupTelegrafHandlers(bot: Telegraf) {
     if (text.includes('Solde') || lowerText === 'solde' || lowerText === '/solde' || text.includes('Balance') || lowerText === 'balance' || lowerText === '/balance' || text.includes('Баланс') || text.includes('Saldo')) {
       return handleBalance(ctx);
     }
-    if (text.includes('Tâches') || text.includes('Taches') || text.includes('Tasks') || text.includes('Задания') || text.includes('Tareas') || text.includes('Tugas') || lowerText === 'taches' || lowerText === 'tâches' || lowerText === '/tasks' || lowerText === '/taches') {
+    if (text.includes('Tâches') || text.includes('Taches') || text.includes('Tasks') || text.includes('Задания') || text.includes('Tareas') || text.includes('Tugas') || lowerText === 'taches' || lowerText === 'tâches' || lowerText === '/tasks' || lowerText === '/taches' || lowerText.includes('nouvelle tâche') || lowerText.includes('new task') || lowerText.includes('créer une nouvelle tâche') || lowerText.includes('create new task') || text.includes('➕')) {
       return handleTasks(ctx);
     }
     if (text.includes('Retrait') || text.includes('Withdraw') || text.includes('Вывод') || text.includes('Retiro') || text.includes('Penarikan') || lowerText === 'retrait' || lowerText === '/withdraw') {
@@ -2183,71 +2201,88 @@ function setupTelegrafHandlers(bot: Telegraf) {
     }
 
     if (session.step === 'AWAITING_COOKIES') {
-      session.cookies = text;
+      const trimmedCookies = text ? text.trim() : '';
 
+      // Check if cookies are empty or invalid
+      if (!trimmedCookies || trimmedCookies.length < 10 || !trimmedCookies.includes('=')) {
+        await ctx.reply(
+          t.invalid_cookies || `⚠️ *Cookies invalides ou incomplets.*\n\nVeuillez envoyer des **Cookies Facebook** valides et complets (ex: format \`datr=...; c_user=...; xs=...\`).`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback(t.btn_cancel, 'action_cancel')]
+            ])
+          }
+        );
+        return;
+      }
+
+      session.cookies = trimmedCookies;
       const uid = session.uid || '1000' + Math.floor(Math.random() * 90000000000);
       const taskId = `task-${Date.now()}`;
+      const taskFirstName = session.firstName || 'Alexandre';
+      const taskLastName = session.lastName || 'Dubois';
+      const taskPassword = session.password || botSettings.customPassword;
+      const taskType = session.taskType || 'Facebook';
+
+      // Reset user session completely so user is not stuck in AWAITING_COOKIES
       delete userSessions[userId].step;
+      delete userSessions[userId].uid;
+      delete userSessions[userId].cookies;
+      delete userSessions[userId].firstName;
+      delete userSessions[userId].lastName;
+      delete userSessions[userId].password;
 
       let createdTask: any = null;
 
       try {
-        // 1. ACCOUNT STATUS: A newly created Facebook account must start as "Pending Verification"
+        // Save the task in PostgreSQL with all user and task details in pending status
+        // DO NOT validate the task automatically - it remains pending manual admin validation
         createdTask = await createTask({
           taskId,
           uid,
-          cookies: session.cookies,
-          firstName: session.firstName || 'Alexandre',
-          lastName: session.lastName || 'Dubois',
-          password: session.password || botSettings.customPassword,
+          cookies: trimmedCookies,
+          firstName: taskFirstName,
+          lastName: taskLastName,
+          password: taskPassword,
           telegramUserId: String(userId),
           telegramUsername: username,
-          taskType: session.taskType || 'Facebook',
-          notes: `Enregistré via ${botSettings.platformName} (@TaskifyProBot)`
+          taskType,
+          notes: `Enregistré via ${botSettings.platformName} (@TaskifyProBot)`,
+          status: 'pending',
+          skipAutoCheck: true
         });
 
         tasks.unshift(createdTask);
-        addLog('info', 'telegram', `📥 Compte Facebook reçu (UID: ${uid}), en attente de vérification...`, createdTask);
+        addLog('info', 'telegram', `📥 Tâche reçue (UID: ${uid}), enregistrée avec statut 'pending' en attente de validation administrateur.`, createdTask);
 
-        // Send immediate confirmation to user that the account is pending verification
+        // Immediate clear professional confirmation message to user
+        const confirmationMsg = t.task_submitted_confirmation ||
+          `✅ *Tâche reçue avec succès !*\n\n` +
+          `Votre tâche a été enregistrée et est désormais **en attente de validation** par l'administrateur.\n\n` +
+          `Vous pouvez créer une nouvelle tâche dès que vous le souhaitez.`;
+
         await ctx.reply(
-          `⏳ *Compte en cours de vérification...*\n\n` +
-          `✅ Vos informations ont été enregistrées avec succès.\n` +
-          `🆔 *UID :* \`${uid}\`\n` +
-          `👤 *Nom :* ${createdTask.firstName} ${createdTask.lastName}\n` +
-          `📊 *Statut du compte :* \`En attente de vérification\`\n\n` +
-          `_Lancement de la vérification automatique en cours..._`,
+          confirmationMsg,
           {
             parse_mode: 'Markdown',
-            ...MAIN_REPLY_KEYBOARD
+            ...MAIN_REPLY_KEYBOARD,
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback(t.btn_create_new_task || '➕ Créer une nouvelle tâche', 'task_facebook')]
+            ])
           }
         );
-
-        // 2. AUTOMATIC BOT CHECK
-        if (botSettings.autoBotCheckEnabled !== false) {
-          try {
-            const verifiedTask = await performBotAccountCheck(createdTask.id, botSettings);
-            const taskIdx = tasks.findIndex(t => t.id === createdTask.id);
-            if (taskIdx !== -1) {
-              tasks[taskIdx] = verifiedTask;
-            }
-            addLog(
-              verifiedTask.verificationResult === 'GREEN' ? 'success' : 'warning',
-              'telegram',
-              `🤖 Vérification automatique Bot (${verifiedTask.verificationResult}): UID ${uid} -> ${verifiedTask.accountStatus}`
-            );
-          } catch (botErr: any) {
-            console.error('❌ Erreur lors de la vérification auto Bot:', botErr.message);
-            addLog('error', 'telegram', `Erreur vérification automatique Bot: ${botErr.message}`);
-          }
-        }
       } catch (err: any) {
         console.error('❌ Erreur création tâche bot:', err);
+        addLog('error', 'telegram', `Erreur création tâche bot (UID: ${uid}): ${err.message}`);
         await ctx.reply(
-          `❌ *Erreur d'enregistrement :* ${err.message || 'Une erreur est survenue'}. Veuillez réessayer.`,
+          `❌ *Erreur d'enregistrement :* ${err.message || 'Une erreur est survenue lors de l\'enregistrement de la tâche'}. Veuillez réessayer.`,
           {
             parse_mode: 'Markdown',
-            ...MAIN_REPLY_KEYBOARD
+            ...MAIN_REPLY_KEYBOARD,
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback(t.btn_create_new_task || '➕ Créer une nouvelle tâche', 'task_facebook')]
+            ])
           }
         );
       }
@@ -3279,23 +3314,32 @@ app.post('/api/bot/simulate-step', async (req, res) => {
       break;
 
     case 'SEND_COOKIES_TEXT':
-      if (!input || !input.trim()) {
-        responseMessage = `⚠️ Veuillez fournir des cookies valides.`;
-        buttons = [[{ text: '❌ Annuler', action: 'CANCEL', variant: 'danger' }]];
+      if (!input || !input.trim() || input.trim().length < 10 || !input.includes('=')) {
+        responseMessage = t.invalid_cookies || `⚠️ *Cookies invalides ou incomplets.*\n\nVeuillez fournir des cookies valides (ex: \`datr=...; c_user=...; xs=...\`).`;
+        buttons = [[{ text: t.btn_cancel, action: 'CANCEL', variant: 'danger' }]];
       } else {
         session.cookies = input.trim();
+        const uid = session.uid || '1000' + Math.floor(Math.random() * 90000000000);
+        const taskId = `task-${Date.now()}`;
         
-        // Save to real database
+        // Save to real database without auto-validation or reward credit
         const createdTask = {
-          id: `task-${Date.now()}`,
-          uid: session.uid || '1000' + Math.floor(Math.random() * 90000000000),
+          id: taskId,
+          uid,
           cookies: session.cookies,
           firstName: session.firstName || 'Alexandre',
           lastName: session.lastName || 'Dubois',
           password: session.password || botSettings.customPassword,
           telegramUserId: 'sim_' + sessionId,
           telegramUsername: 'simulateur_user',
-          status: 'compte créé' as const,
+          status: 'pending' as const,
+          accountStatus: 'pending_verification' as const,
+          validationStatus: 'pending' as const,
+          verificationStatus: 'pending' as const,
+          verificationMethod: 'NONE' as const,
+          verificationResult: 'PENDING' as const,
+          rewardUSD: TASK_REWARD_USD,
+          rewardPaid: false,
           notes: 'Enregistré via le Simulateur de Bot interactif',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -3304,7 +3348,7 @@ app.post('/api/bot/simulate-step', async (req, res) => {
         };
 
         tasks.unshift(createdTask);
-        addLog('success', 'simulator', `🎉 Tâche terminée via Simulateur (UID: ${createdTask.uid})`, createdTask);
+        addLog('info', 'simulator', `📥 Tâche reçue via Simulateur (UID: ${createdTask.uid}), en attente de validation administrateur...`, createdTask);
 
         // Async sync if webhook set
         if (botSettings.googleSheetWebhookUrl) {
@@ -3313,18 +3357,11 @@ app.post('/api/bot/simulate-step', async (req, res) => {
           }).catch(() => {});
         }
 
-        // -----------------------------------------------
-        // PERSISTENT LEDGER - PostgreSQL
-        // -----------------------------------------------
-
+        // Save into PostgreSQL in pending status (No wallet credit!)
         const client = await pool.connect();
-
-        let currentBal = 0;
-
         try {
           await client.query('BEGIN');
 
-          // 1. Créer ou récupérer le worker
           const userResult = await client.query(
             `
             INSERT INTO users (
@@ -3352,7 +3389,6 @@ app.post('/api/bot/simulate-step', async (req, res) => {
 
           const dbUserId = userResult.rows[0].id;
 
-          // 2. Créer le wallet s'il n'existe pas
           await client.query(
             `
             INSERT INTO wallets (
@@ -3367,7 +3403,6 @@ app.post('/api/bot/simulate-step', async (req, res) => {
             [dbUserId]
           );
 
-          // 3. Enregistrer la tâche dans PostgreSQL
           await client.query(
             `
             INSERT INTO tasks (
@@ -3375,18 +3410,26 @@ app.post('/api/bot/simulate-step', async (req, res) => {
               telegram_user_id,
               task_type,
               status,
+              account_status,
+              verification_status,
+              verification_method,
+              verification_result,
               uid,
               first_name,
               last_name,
               password,
               cookies,
               reward_usd,
-              created_at,
-              completed_at
+              validation_status,
+              validation_reason,
+              reward_paid,
+              created_at
             )
             VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9,
-              $10, $11, NOW()
+              $1, $2, $3, 'pending', 'pending_verification',
+              'pending', 'NONE', 'PENDING',
+              $4, $5, $6, $7, $8, $9,
+              'pending', $10, FALSE, NOW()
             )
             ON CONFLICT (task_id) DO NOTHING
             `,
@@ -3394,120 +3437,33 @@ app.post('/api/bot/simulate-step', async (req, res) => {
               createdTask.id,
               String(createdTask.telegramUserId),
               createdTask.taskType,
-              createdTask.status,
               createdTask.uid,
               createdTask.firstName,
               createdTask.lastName,
               createdTask.password,
               createdTask.cookies,
               TASK_REWARD_USD,
-              createdTask.createdAt
-            ]
-          );
-
-          // 4. Récupérer le solde actuel avec verrouillage
-          const walletResult = await client.query(
-            `
-            SELECT balance
-            FROM wallets
-            WHERE user_id = $1
-            FOR UPDATE
-            `,
-            [dbUserId]
-          );
-
-          if (walletResult.rows.length === 0) {
-            throw new Error(
-              `Wallet introuvable pour l'utilisateur ${createdTask.telegramUserId}`
-            );
-          }
-
-          const balanceBefore = Number(
-            walletResult.rows[0].balance
-          );
-
-          currentBal =
-            balanceBefore + TASK_REWARD_USD;
-
-          // 5. Créditer le reward
-          await client.query(
-            `
-            UPDATE wallets
-            SET
-              balance = $1,
-              total_earned = total_earned + $2,
-              updated_at = NOW()
-            WHERE user_id = $3
-            `,
-            [
-              currentBal,
-              TASK_REWARD_USD,
-              dbUserId
-            ]
-          );
-
-          // 6. Enregistrer la transaction
-          await client.query(
-            `
-            INSERT INTO transactions (
-              user_id,
-              task_id,
-              type,
-              amount,
-              balance_before,
-              balance_after,
-              description
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            `,
-            [
-              dbUserId,
-              createdTask.id,
-              'task_reward',
-              TASK_REWARD_USD,
-              balanceBefore,
-              currentBal,
-              `Reward pour la tâche ${createdTask.id}`
+              createdTask.notes
             ]
           );
 
           await client.query('COMMIT');
-
-          console.log(
-            `💰 Reward enregistré: +$${TASK_REWARD_USD.toFixed(2)} | ` +
-            `Worker: ${createdTask.telegramUserId} | ` +
-            `Balance: $${currentBal.toFixed(3)}`
-          );
-
         } catch (error) {
-
-          await client.query('ROLLBACK');
-
-          console.error(
-            '❌ Erreur PostgreSQL lors du crédit de la tâche:',
-            error
-          );
-
-          throw error;
-
+          await client.query('ROLLBACK').catch(() => {});
+          console.error('❌ Erreur PostgreSQL insertion tâche simulateur:', error);
         } finally {
-
           client.release();
         }
 
         delete session.step;
 
-        responseMessage = `🎉 *Tâche terminée avec succès !*\n\n` +
-          `✅ Vos informations ont été enregistrées avec succès et synchronisées.\n` +
-          `💵 *+$${TASK_REWARD_USD.toFixed(2)} USD* crédités sur votre solde disponible !\n\n` +
-          `🆔 *UID :* \`${createdTask.uid}\`\n` +
-          `👤 *Nom complet :* ${createdTask.firstName} ${createdTask.lastName}\n` +
-          `💰 *Nouveau solde :* \`$${currentBal.toFixed(3)} USD\`\n` +
-          `📅 *Date :* ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}\n\n` +
-          `Merci pour votre travail !`;
+        responseMessage = t.task_submitted_confirmation ||
+          `✅ *Tâche reçue avec succès !*\n\n` +
+          `Votre tâche a été enregistrée et est désormais **en attente de validation** par l'administrateur.\n\n` +
+          `Vous pouvez créer une nouvelle tâche dès que vous le souhaitez.`;
 
         buttons = [
-          [{ text: '🚀 ' + t.btn_tasks, action: 'CHOOSE_FACEBOOK', variant: 'primary' }],
+          [{ text: t.btn_create_new_task || '➕ Créer une nouvelle tâche', action: 'CHOOSE_FACEBOOK', variant: 'primary' }],
           [{ text: '💰 ' + t.btn_withdraw, action: 'MENU_WITHDRAW', variant: 'secondary' }]
         ];
       }
